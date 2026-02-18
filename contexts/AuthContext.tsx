@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { apiRequest } from '@/lib/query-client';
 
 export type UserRole = 'citizen' | 'cleaner' | 'admin';
 
@@ -63,19 +64,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const login = async (role: UserRole, name: string) => {
-    await Promise.all([
-      AsyncStorage.setItem('isLoggedIn', 'true'),
-      AsyncStorage.setItem('userRole', role),
-      AsyncStorage.setItem('userName', name),
-      AsyncStorage.setItem('userCredits', '150'),
-    ]);
-    setState(prev => ({
-      ...prev,
-      isLoggedIn: true,
-      userRole: role,
-      userName: name,
-      userCredits: 150,
-    }));
+    try {
+      // Use name as username for simplicity
+      const response = await apiRequest('POST', '/api/register', {
+        name,
+        role,
+        username: name.toLowerCase().replace(/\s+/g, '_'),
+        password: 'password123' // Default password for simple login
+      });
+
+      const userData = await response.json();
+
+      await Promise.all([
+        AsyncStorage.setItem('isLoggedIn', 'true'),
+        AsyncStorage.setItem('userRole', role),
+        AsyncStorage.setItem('userName', name),
+        AsyncStorage.setItem('userCredits', '150'),
+      ]);
+
+      setState(prev => ({
+        ...prev,
+        isLoggedIn: true,
+        userRole: role,
+        userName: name,
+        userCredits: 150,
+      }));
+    } catch (error) {
+      console.error('Login error:', error);
+      // Fallback for demo purposes if server is down, still let them log in locally
+      await Promise.all([
+        AsyncStorage.setItem('isLoggedIn', 'true'),
+        AsyncStorage.setItem('userRole', role),
+        AsyncStorage.setItem('userName', name),
+        AsyncStorage.setItem('userCredits', '150'),
+      ]);
+      setState(prev => ({
+        ...prev,
+        isLoggedIn: true,
+        userRole: role,
+        userName: name,
+        userCredits: 150,
+      }));
+    }
   };
 
   const logout = async () => {

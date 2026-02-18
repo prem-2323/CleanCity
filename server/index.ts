@@ -1,5 +1,6 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
+import mongoose from "mongoose";
 import { registerRoutes } from "./routes";
 import * as fs from "fs";
 import * as path from "path";
@@ -226,6 +227,18 @@ function setupErrorHandler(app: express.Application) {
 }
 
 (async () => {
+  if (!process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is required");
+  }
+
+  try {
+    await mongoose.connect(process.env.DATABASE_URL);
+    log("Connected to MongoDB");
+  } catch (error) {
+    console.error("MongoDB connection error:", error);
+    process.exit(1);
+  }
+
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);
