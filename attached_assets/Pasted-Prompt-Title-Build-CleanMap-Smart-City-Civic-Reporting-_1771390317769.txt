@@ -1,0 +1,386 @@
+Prompt Title:
+Build CleanMap – Smart City Civic Reporting Mobile App (React Native + TypeScript)
+
+Prompt:
+
+Build a complete React Native mobile application called CleanMap.
+
+Use:
+
+React Native
+
+TypeScript
+
+Expo
+
+React Navigation (Stack + Bottom Tabs)
+
+AsyncStorage
+
+React Native Reanimated
+
+React Native SVG (for circular progress)
+
+Victory Native or React Native Chart Kit (for charts)
+
+The app must be:
+
+Mobile-first
+
+Production-ready
+
+Clean architecture
+
+Smooth animations
+
+No TypeScript errors
+
+No console warnings
+
+Government-grade professional UI
+
+🎨 DESIGN SYSTEM
+
+Use this color palette:
+
+Primary: #1E3A8A
+Secondary: #3B82F6
+Accent: #60A5FA
+Light: #DBEAFE
+Background: #F8FAFC
+
+Success: #10B981
+Warning: #F59E0B
+Danger: #EF4444
+
+Design rules:
+
+Rounded corners (16–24 radius)
+
+Card padding 16–20
+
+Soft shadows
+
+Minimum touch height 44px
+
+Clean typography hierarchy
+
+High contrast (WCAG friendly)
+
+🧠 APP FLOW
+
+On first launch:
+
+Show one-time Welcome screen with animated “Hi 👋 Welcome to CleanMap”
+
+Store hasSeenWelcome in AsyncStorage
+
+After first time, never show again
+
+Authentication Flow:
+
+If not seen welcome → WelcomeScreen
+
+If seen but not logged in → LoginScreen
+
+If logged in → Role-based dashboard
+
+Store in AsyncStorage:
+
+hasSeenWelcome
+
+isLoggedIn
+
+userRole
+
+👥 ROLES
+
+3 roles:
+
+Citizen
+
+Cleaner
+
+Admin
+
+Use Context API for global state.
+
+📱 NAVIGATION STRUCTURE
+
+Use:
+
+Root Stack Navigator:
+
+Welcome
+
+Login
+
+RoleSelection
+
+MainApp
+
+Inside MainApp use Bottom Tabs based on role.
+
+Citizen Tabs:
+
+Home
+
+Report
+
+Reports
+
+Map
+
+Profile
+
+Cleaner Tabs:
+
+Home
+
+Tasks
+
+Map
+
+Profile
+
+Admin Tabs:
+
+Home
+
+Complaints
+
+Analytics
+
+Settings
+
+📊 SCREENS TO BUILD
+
+Citizen:
+
+DashboardScreen
+
+Animated credits counter
+
+Circular progress toward next reward
+
+Mini trend chart
+
+Quick action cards
+
+Notification badge
+
+Floating action button
+
+ReportWasteScreen
+
+Camera simulation
+
+AI waste detection simulation
+
+Confidence %
+
+Submit flow
+
+AIVerificationScreen
+
+Animated checklist
+
+Credits earned card
+
+MyReportsScreen
+
+Status filters
+
+Report cards
+
+Priority tags
+
+MapViewScreen
+
+Placeholder map
+
+Report markers
+
+Legend
+
+Cleaner:
+
+CleanerDashboard
+
+Assigned tasks
+
+Performance stats
+
+Credits overview
+
+AssignedTaskScreen
+
+Before image
+
+Priority badge
+
+Checklist
+
+Navigate button
+
+UploadAfterCleanScreen
+
+After photo simulation
+
+AI verification animation
+
+Success reward screen
+
+Admin:
+
+AdminDashboard
+
+KPI cards
+
+Complaint stats
+
+Heatmap preview
+
+ComplaintManagementScreen
+
+Filter tabs
+
+Priority dropdown (must work)
+
+Assign staff button
+
+AssignStaffScreen
+
+Staff list
+
+Rating + workload
+
+Select and confirm assignment
+
+AnalyticsScreen
+
+Bar chart
+
+Pie chart
+
+Staff ranking
+
+Export button
+
+Shared:
+
+ProfileScreen
+
+Circular profile completeness
+
+Achievement badge grid
+
+Level display
+
+Stats layout
+
+RewardsScreen
+
+Earn / Redeem tabs
+
+Points tracking
+
+SettingsScreen
+
+Language dropdown
+
+Notification toggle
+
+Logout
+
+✨ REUSABLE COMPONENTS TO BUILD
+
+Create:
+
+AnimatedCounter
+Counts smoothly from 0 to value.
+
+CircularProgress
+SVG-based animated progress circle.
+Color-coded by percentage.
+
+MiniTrendChart
+Small inline chart with up/down indicator.
+
+NotificationPanel
+Slide-down animated drawer with filters and read/unread state.
+
+AchievementBadge
+Bronze / Silver / Gold / Platinum tiers with locked/unlocked states.
+
+🎭 ANIMATIONS
+
+Use Reanimated for:
+
+Fade-in welcome screen
+
+Number counting
+
+Progress bar fill
+
+Badge unlock animation
+
+Notification drawer slide
+
+Button press feedback
+
+Page transitions
+
+Animations must be:
+
+Smooth
+
+Fast
+
+Subtle
+
+Professional
+
+♿ ACCESSIBILITY
+
+44px touch targets
+
+High contrast
+
+Accessible labels
+
+Keyboard-safe
+
+Proper semantic structure
+
+📦 FINAL REQUIREMENTS
+
+Deliver:
+
+Full folder structure
+
+Clean modular code
+
+Proper TypeScript types
+
+Working navigation
+
+Working AsyncStorage logic
+
+Working priority dropdown update
+
+No unused variables
+
+No warnings
+
+Clean scalable architecture
+
+Improve slightly beyond basic design:
+
+Add subtle gradients
+
+Add shimmer loading states
+
+Add professional empty states
+
+Add micro-interactions
