@@ -22,6 +22,10 @@ function NativeTabLayout() {
         <Icon sf={{ default: 'chart.bar', selected: 'chart.bar.fill' }} />
         <Label>Analytics</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="staff">
+        <Icon sf={{ default: 'person.2', selected: 'person.2.fill' }} />
+        <Label>Staff</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
         <Icon sf={{ default: 'gear', selected: 'gear' }} />
         <Label>Settings</Label>
@@ -58,6 +62,7 @@ function ClassicTabLayout() {
       <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} /> }} />
       <Tabs.Screen name="complaints" options={{ title: 'Complaints', tabBarIcon: ({ color, size }) => <Ionicons name="alert-circle" size={size} color={color} /> }} />
       <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ color, size }) => <Ionicons name="bar-chart" size={size} color={color} /> }} />
+      <Tabs.Screen name="staff" options={{ title: 'Staff', tabBarIcon: ({ color, size }) => <Ionicons name="people" size={size} color={color} /> }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: ({ color, size }) => <Ionicons name="settings" size={size} color={color} /> }} />
     </Tabs>
   );

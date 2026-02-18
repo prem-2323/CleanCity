@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, Platform } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,7 +9,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useReports } from '@/contexts/ReportsContext';
 import { Card } from '@/components/Card';
 import { MiniTrendChart } from '@/components/MiniTrendChart';
+import { AnimatedCounter } from '@/components/AnimatedCounter';
 import Colors from '@/constants/colors';
+
+const ACTIVITY_FEED = [
+  { id: '1', text: 'New critical complaint in Sector 8', time: '2m ago', icon: 'alert-circle' as const, color: Colors.danger },
+  { id: '2', text: 'Arjun Patel completed task #142', time: '15m ago', icon: 'checkmark-circle' as const, color: Colors.success },
+  { id: '3', text: 'Staff assigned to Zone B report', time: '32m ago', icon: 'person-add' as const, color: Colors.secondary },
+  { id: '4', text: 'New citizen report submitted', time: '1h ago', icon: 'document-text' as const, color: Colors.primary },
+  { id: '5', text: 'Weekly performance report ready', time: '2h ago', icon: 'analytics' as const, color: '#8B5CF6' },
+];
 
 export default function AdminDashboard() {
   const insets = useSafeAreaInsets();
@@ -17,16 +26,18 @@ export default function AdminDashboard() {
   const { reports } = useReports();
 
   const pendingCount = reports.filter(r => r.status === 'pending').length;
-  const assignedCount = reports.filter(r => r.status === 'assigned').length;
   const resolvedCount = reports.filter(r => r.status === 'resolved').length;
   const criticalCount = reports.filter(r => r.priority === 'critical').length;
+  const resolutionRate = reports.length > 0 ? Math.round((resolvedCount / reports.length) * 100) : 0;
+  const avgResponseTime = 4.2;
+  const showCriticalAlert = criticalCount > 3;
 
-  const kpis = [
-    { label: 'Total Reports', value: reports.length.toString(), icon: 'document-text' as const, color: Colors.primary, trend: [12, 18, 15, 22, 25, 20, reports.length] },
-    { label: 'Pending', value: pendingCount.toString(), icon: 'time' as const, color: Colors.warning, trend: [5, 8, 6, 9, 7, 4, pendingCount] },
-    { label: 'Resolved', value: resolvedCount.toString(), icon: 'checkmark-circle' as const, color: Colors.success, trend: [3, 5, 7, 8, 10, 12, resolvedCount] },
-    { label: 'Critical', value: criticalCount.toString(), icon: 'warning' as const, color: Colors.danger, trend: [2, 4, 3, 5, 3, 2, criticalCount] },
-  ];
+  const kpis = useMemo(() => [
+    { label: 'Total Reports', value: reports.length, icon: 'document-text' as const, color: Colors.primary, trend: [12, 18, 15, 22, 25, 20, reports.length] },
+    { label: 'Pending', value: pendingCount, icon: 'time' as const, color: Colors.warning, trend: [5, 8, 6, 9, 7, 4, pendingCount] },
+    { label: 'Resolved', value: resolvedCount, icon: 'checkmark-circle' as const, color: Colors.success, trend: [3, 5, 7, 8, 10, 12, resolvedCount] },
+    { label: 'Critical', value: criticalCount, icon: 'warning' as const, color: Colors.danger, trend: [2, 4, 3, 5, 3, 2, criticalCount] },
+  ], [reports.length, pendingCount, resolvedCount, criticalCount]);
 
   return (
     <View style={styles.container}>
@@ -44,6 +55,18 @@ export default function AdminDashboard() {
       </LinearGradient>
 
       <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]} showsVerticalScrollIndicator={false}>
+        {showCriticalAlert && (
+          <Animated.View entering={FadeInDown.delay(50).duration(400)}>
+            <View style={styles.alertBanner}>
+              <Ionicons name="alert-circle" size={20} color={Colors.white} />
+              <Text style={styles.alertText}>{criticalCount} critical complaints require immediate attention</Text>
+              <Pressable onPress={() => router.push('/(admin)/complaints' as any)} style={styles.alertAction}>
+                <Text style={styles.alertActionText}>View</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        )}
+
         <Animated.View entering={FadeInDown.delay(100).duration(500)} style={styles.kpiGrid}>
           {kpis.map((kpi, i) => (
             <Card key={i} style={styles.kpiCard}>
@@ -53,10 +76,27 @@ export default function AdminDashboard() {
                 </View>
                 <MiniTrendChart data={kpi.trend} width={50} height={24} color={kpi.color} />
               </View>
-              <Text style={styles.kpiValue}>{kpi.value}</Text>
+              <AnimatedCounter value={kpi.value} style={styles.kpiValue} />
               <Text style={styles.kpiLabel}>{kpi.label}</Text>
             </Card>
           ))}
+        </Animated.View>
+
+        <Animated.View entering={FadeInDown.delay(150).duration(500)} style={styles.metricsRow}>
+          <Card style={styles.metricCard}>
+            <View style={[styles.metricIcon, { backgroundColor: Colors.success + '15' }]}>
+              <Ionicons name="trending-up" size={18} color={Colors.success} />
+            </View>
+            <AnimatedCounter value={resolutionRate} suffix="%" style={styles.metricValue} />
+            <Text style={styles.metricLabel}>Resolution Rate</Text>
+          </Card>
+          <Card style={styles.metricCard}>
+            <View style={[styles.metricIcon, { backgroundColor: Colors.secondary + '15' }]}>
+              <Ionicons name="speedometer" size={18} color={Colors.secondary} />
+            </View>
+            <Text style={styles.metricValue}>{avgResponseTime}h</Text>
+            <Text style={styles.metricLabel}>Avg Response</Text>
+          </Card>
         </Animated.View>
 
         <Animated.View entering={FadeInDown.delay(200).duration(500)}>
@@ -94,6 +134,25 @@ export default function AdminDashboard() {
           </Card>
         </Animated.View>
 
+        <Animated.View entering={FadeInDown.delay(250).duration(500)}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Live Activity</Text>
+          </View>
+          <Card style={styles.activityCard}>
+            {ACTIVITY_FEED.map((item, i) => (
+              <View key={item.id} style={[styles.activityRow, i > 0 && styles.activityBorder]}>
+                <View style={[styles.activityIcon, { backgroundColor: item.color + '15' }]}>
+                  <Ionicons name={item.icon} size={16} color={item.color} />
+                </View>
+                <View style={styles.activityInfo}>
+                  <Text style={styles.activityText} numberOfLines={1}>{item.text}</Text>
+                  <Text style={styles.activityTime}>{item.time}</Text>
+                </View>
+              </View>
+            ))}
+          </Card>
+        </Animated.View>
+
         <Animated.View entering={FadeInDown.delay(300).duration(500)}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Recent Complaints</Text>
@@ -128,13 +187,22 @@ const styles = StyleSheet.create({
   notifBtn: { width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
   notifDot: { position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.danger },
   scrollContent: { paddingHorizontal: 20, paddingTop: 16 },
-  kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 16 },
+  alertBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: Colors.danger, borderRadius: 14, padding: 14, marginBottom: 16 },
+  alertText: { flex: 1, fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.white },
+  alertAction: { backgroundColor: 'rgba(255,255,255,0.25)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  alertActionText: { fontSize: 12, fontFamily: 'Inter_600SemiBold', color: Colors.white },
+  kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 12 },
   kpiCard: { width: '47%' as any, padding: 14 },
   kpiHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   kpiIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   kpiValue: { fontSize: 28, fontFamily: 'Inter_700Bold', color: Colors.gray900 },
   kpiLabel: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.gray500, marginTop: 2 },
-  heatmapCard: { marginBottom: 20 },
+  metricsRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
+  metricCard: { flex: 1, alignItems: 'center', paddingVertical: 16 },
+  metricIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  metricValue: { fontSize: 24, fontFamily: 'Inter_700Bold', color: Colors.gray900 },
+  metricLabel: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.gray500, marginTop: 2 },
+  heatmapCard: { marginBottom: 16 },
   cardTitle: { fontSize: 16, fontFamily: 'Inter_700Bold', color: Colors.gray900, marginBottom: 14 },
   heatmapGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   heatmapCell: { width: 36, height: 36, borderRadius: 6 },
@@ -145,6 +213,13 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontSize: 18, fontFamily: 'Inter_700Bold', color: Colors.gray900 },
   seeAll: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.secondary },
+  activityCard: { marginBottom: 16, padding: 0 },
+  activityRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  activityBorder: { borderTopWidth: 1, borderTopColor: Colors.gray100 },
+  activityIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  activityInfo: { flex: 1 },
+  activityText: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.gray800 },
+  activityTime: { fontSize: 11, fontFamily: 'Inter_400Regular', color: Colors.gray400, marginTop: 2 },
   complaintCard: { marginBottom: 10 },
   complaintRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   priorityIndicator: { width: 4, height: 40, borderRadius: 2 },

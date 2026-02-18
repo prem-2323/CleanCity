@@ -29,7 +29,9 @@ export interface StaffMember {
   rating: number;
   tasksCompleted: number;
   activeTasks: number;
+  maxTasks: number;
   zone: string;
+  active: boolean;
 }
 
 interface ReportsContextValue {
@@ -37,18 +39,20 @@ interface ReportsContextValue {
   staff: StaffMember[];
   addReport: (report: Report) => Promise<void>;
   updateReport: (id: string, updates: Partial<Report>) => Promise<void>;
+  bulkUpdateReports: (ids: string[], updates: Partial<Report>) => Promise<void>;
   getReportsByStatus: (status: ReportStatus) => Report[];
+  getBestAvailableStaff: () => StaffMember | null;
   isLoading: boolean;
 }
 
 const ReportsContext = createContext<ReportsContextValue | null>(null);
 
 const SAMPLE_STAFF: StaffMember[] = [
-  { id: '1', name: 'Arjun Patel', rating: 4.8, tasksCompleted: 142, activeTasks: 3, zone: 'Zone A' },
-  { id: '2', name: 'Priya Sharma', rating: 4.6, tasksCompleted: 128, activeTasks: 2, zone: 'Zone B' },
-  { id: '3', name: 'Rahul Kumar', rating: 4.9, tasksCompleted: 167, activeTasks: 1, zone: 'Zone A' },
-  { id: '4', name: 'Sneha Reddy', rating: 4.5, tasksCompleted: 95, activeTasks: 4, zone: 'Zone C' },
-  { id: '5', name: 'Vikram Singh', rating: 4.7, tasksCompleted: 110, activeTasks: 2, zone: 'Zone B' },
+  { id: '1', name: 'Arjun Patel', rating: 4.8, tasksCompleted: 142, activeTasks: 3, maxTasks: 8, zone: 'Zone A', active: true },
+  { id: '2', name: 'Priya Sharma', rating: 4.6, tasksCompleted: 128, activeTasks: 2, maxTasks: 8, zone: 'Zone B', active: true },
+  { id: '3', name: 'Rahul Kumar', rating: 4.9, tasksCompleted: 167, activeTasks: 1, maxTasks: 8, zone: 'Zone A', active: true },
+  { id: '4', name: 'Sneha Reddy', rating: 4.5, tasksCompleted: 95, activeTasks: 4, maxTasks: 8, zone: 'Zone C', active: false },
+  { id: '5', name: 'Vikram Singh', rating: 4.7, tasksCompleted: 110, activeTasks: 2, maxTasks: 8, zone: 'Zone B', active: true },
 ];
 
 const SAMPLE_REPORTS: Report[] = [
@@ -114,10 +118,28 @@ export function ReportsProvider({ children }: { children: ReactNode }) {
     await AsyncStorage.setItem('reports', JSON.stringify(updated));
   };
 
+  const bulkUpdateReports = async (ids: string[], updates: Partial<Report>) => {
+    const idSet = new Set(ids);
+    const updated = reports.map(r => idSet.has(r.id) ? { ...r, ...updates } : r);
+    setReports(updated);
+    await AsyncStorage.setItem('reports', JSON.stringify(updated));
+  };
+
   const getReportsByStatus = (status: ReportStatus) => reports.filter(r => r.status === status);
 
+  const getBestAvailableStaff = (): StaffMember | null => {
+    const available = SAMPLE_STAFF.filter(s => s.active && s.activeTasks < s.maxTasks);
+    if (available.length === 0) return null;
+    return available.sort((a, b) => {
+      const workloadA = a.activeTasks / a.maxTasks;
+      const workloadB = b.activeTasks / b.maxTasks;
+      if (workloadA !== workloadB) return workloadA - workloadB;
+      return b.rating - a.rating;
+    })[0];
+  };
+
   const value = useMemo(() => ({
-    reports, staff: SAMPLE_STAFF, addReport, updateReport, getReportsByStatus, isLoading,
+    reports, staff: SAMPLE_STAFF, addReport, updateReport, bulkUpdateReports, getReportsByStatus, getBestAvailableStaff, isLoading,
   }), [reports, isLoading]);
 
   return <ReportsContext.Provider value={value}>{children}</ReportsContext.Provider>;
