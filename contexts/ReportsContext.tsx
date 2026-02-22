@@ -19,6 +19,9 @@ export interface Report {
   id: string;
   title: string;
   description: string;
+  reporterId: string;
+  reporterName: string;
+  reporterEmail: string;
   wasteType: WasteType;
   status: ReportStatus;
   priority: ReportPriority;

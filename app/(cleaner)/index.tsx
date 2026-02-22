@@ -13,9 +13,14 @@ import Colors from '@/constants/colors';
 
 export default function CleanerDashboard() {
   const insets = useSafeAreaInsets();
-  const { userName, userCredits } = useAuth();
+  const { userName, userCredits, uid, userEmail } = useAuth();
   const { reports } = useReports();
-  const assignedTasks = reports.filter(r => r.status === 'assigned' || r.status === 'in_progress');
+
+  const isAssignedStatus = (status: string) => status === 'assigned' || status === 'in_progress';
+  const assignedToMe = reports.filter(r => isAssignedStatus(r.status) && (r.assignedTo === uid || r.assignedTo === userEmail));
+  const assignedFallback = reports.filter(r => isAssignedStatus(r.status));
+  const assignedTasks = assignedToMe.length > 0 ? assignedToMe : assignedFallback;
+
   const completedTasks = reports.filter(r => r.status === 'resolved');
 
   return (

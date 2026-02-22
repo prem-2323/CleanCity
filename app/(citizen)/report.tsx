@@ -25,7 +25,7 @@ const WASTE_TYPES: { type: WasteType; icon: keyof typeof Ionicons.glyphMap; labe
 export default function ReportWasteScreen() {
   const insets = useSafeAreaInsets();
   const { addReport } = useReports();
-  const { addCredits } = useAuth();
+  const { addCredits, uid, userEmail, userName } = useAuth();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [selectedType, setSelectedType] = useState<WasteType | null>(null);
@@ -55,6 +55,20 @@ export default function ReportWasteScreen() {
   };
 
   const uploadImage = async (uri: string, reportId: string) => {
+    if (Platform.OS === 'web') {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('Failed to process image on web'));
+        reader.readAsDataURL(blob);
+      });
+
+      return dataUrl;
+    }
+
     const response = await fetch(uri);
     const blob = await response.blob();
     const storageRef = ref(storage, `reports/${reportId}.jpg`);
@@ -64,6 +78,10 @@ export default function ReportWasteScreen() {
 
   const handleSubmit = async () => {
     if (!canSubmit || !selectedType || !imageUri) return;
+    if (!uid) {
+      alert('Please sign in to submit a report.');
+      return;
+    }
     setIsSubmitting(true);
 
     try {
@@ -78,6 +96,9 @@ export default function ReportWasteScreen() {
       const report: Omit<Report, 'id'> = {
         title: title.trim(),
         description: description.trim(),
+        reporterId: uid,
+        reporterName: userName || 'Citizen',
+        reporterEmail: userEmail || '',
         wasteType: selectedType,
         status: 'pending',
         priority: selectedType === 'hazardous' ? 'critical' : selectedType === 'electronic' ? 'high' : 'medium',

@@ -3,12 +3,18 @@ import { View, Text, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useReports } from '@/contexts/ReportsContext';
+import { useAuth } from '@/contexts/AuthContext';
 import Colors from '@/constants/colors';
 
 export default function CleanerMapScreen() {
   const insets = useSafeAreaInsets();
+  const { uid, userEmail } = useAuth();
   const { reports } = useReports();
-  const assignedTasks = reports.filter(r => r.status === 'assigned' || r.status === 'in_progress');
+
+  const isAssignedStatus = (status: string) => status === 'assigned' || status === 'in_progress';
+  const assignedToMe = reports.filter(r => isAssignedStatus(r.status) && (r.assignedTo === uid || r.assignedTo === userEmail));
+  const assignedFallback = reports.filter(r => isAssignedStatus(r.status));
+  const assignedTasks = assignedToMe.length > 0 ? assignedToMe : assignedFallback;
 
   return (
     <View style={styles.container}>

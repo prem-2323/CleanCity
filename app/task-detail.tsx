@@ -1,21 +1,51 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, Platform } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useReports } from '@/contexts/ReportsContext';
+import { useReports, Report } from '@/contexts/ReportsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { StatusBadge, PriorityBadge } from '@/components/StatusBadge';
 import { Card } from '@/components/Card';
 import Colors from '@/constants/colors';
+import { db } from '@/lib/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { Image } from 'react-native';
 
 export default function TaskDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
-  const { reports, updateReport } = useReports();
+  const { updateReport } = useReports();
   const { addCredits } = useAuth();
-  const report = reports.find(r => r.id === id);
+  const [report, setReport] = useState<Report | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!id || typeof id !== 'string') {
+      setIsLoading(false);
+      return;
+    }
+
+    const reportRef = doc(db, 'reports', id);
+    const unsubscribe = onSnapshot(reportRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        setReport(null);
+        setIsLoading(false);
+        return;
+      }
+
+      setReport({
+        id: snapshot.id,
+        ...snapshot.data(),
+      } as Report);
+      setIsLoading(false);
+    }, () => {
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [id]);
 
   const [checklist, setChecklist] = useState([
     { id: '1', label: 'Arrived at location', done: false },
@@ -38,6 +68,19 @@ export default function TaskDetailScreen() {
     await addCredits(30);
     router.back();
   };
+
+  if (isLoading) {
+    return (
+      <View style={[styles.container, { paddingTop: (Platform.OS === 'web' ? 67 : insets.top) + 20 }]}>
+        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={22} color={Colors.gray800} />
+        </Pressable>
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyText}>Loading task...</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (!report) {
     return (
@@ -78,8 +121,14 @@ export default function TaskDetailScreen() {
         <Card style={styles.section}>
           <Text style={styles.sectionTitle}>Before Photo</Text>
           <View style={styles.photoPlaceholder}>
-            <Ionicons name="image-outline" size={40} color={Colors.gray300} />
-            <Text style={styles.photoLabel}>Reported waste image</Text>
+            {report.beforeImage ? (
+              <Image source={{ uri: report.beforeImage }} style={styles.reportImage} />
+            ) : (
+              <>
+                <Ionicons name="image-outline" size={40} color={Colors.gray300} />
+                <Text style={styles.photoLabel}>Reported waste image</Text>
+              </>
+            )}
           </View>
         </Card>
 
@@ -131,6 +180,7 @@ const styles = StyleSheet.create({
   section: { marginBottom: 12 },
   sectionTitle: { fontSize: 15, fontFamily: 'Inter_700Bold', color: Colors.gray900, marginBottom: 12 },
   photoPlaceholder: { height: 150, borderRadius: 14, backgroundColor: Colors.gray100, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  reportImage: { width: '100%', height: '100%', borderRadius: 14 },
   photoLabel: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.gray400 },
   checkItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.gray100 },
   checkbox: { width: 24, height: 24, borderRadius: 8, borderWidth: 2, borderColor: Colors.gray300, alignItems: 'center', justifyContent: 'center' },

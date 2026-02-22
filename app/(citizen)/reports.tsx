@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useReports, ReportStatus } from '@/contexts/ReportsContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { StatusBadge, PriorityBadge } from '@/components/StatusBadge';
 import { Card } from '@/components/Card';
 import Colors from '@/constants/colors';
@@ -20,9 +21,11 @@ const FILTERS: { key: ReportStatus | 'all'; label: string }[] = [
 export default function MyReportsScreen() {
   const insets = useSafeAreaInsets();
   const { reports } = useReports();
+  const { uid } = useAuth();
   const [filter, setFilter] = useState<ReportStatus | 'all'>('all');
 
-  const filtered = filter === 'all' ? reports : reports.filter(r => r.status === filter);
+  const myReports = reports.filter(r => r.reporterId === uid);
+  const filtered = filter === 'all' ? myReports : myReports.filter(r => r.status === filter);
 
   return (
     <View style={styles.container}>

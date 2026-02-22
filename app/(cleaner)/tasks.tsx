@@ -4,14 +4,20 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useReports } from '@/contexts/ReportsContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { StatusBadge, PriorityBadge } from '@/components/StatusBadge';
 import { Card } from '@/components/Card';
 import Colors from '@/constants/colors';
 
 export default function TasksScreen() {
   const insets = useSafeAreaInsets();
+  const { uid, userEmail } = useAuth();
   const { reports } = useReports();
-  const tasks = reports.filter(r => r.status === 'assigned' || r.status === 'in_progress');
+
+  const isAssignedStatus = (status: string) => status === 'assigned' || status === 'in_progress';
+  const assignedToMe = reports.filter(r => isAssignedStatus(r.status) && (r.assignedTo === uid || r.assignedTo === userEmail));
+  const assignedFallback = reports.filter(r => isAssignedStatus(r.status));
+  const tasks = assignedToMe.length > 0 ? assignedToMe : assignedFallback;
 
   return (
     <View style={styles.container}>

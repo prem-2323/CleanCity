@@ -1,20 +1,49 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, Platform } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useReports } from '@/contexts/ReportsContext';
+import { Report } from '@/contexts/ReportsContext';
 import { StatusBadge, PriorityBadge } from '@/components/StatusBadge';
 import { Card } from '@/components/Card';
 import Colors from '@/constants/colors';
+import { db } from '@/lib/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { Image } from 'react-native';
 
 export default function ReportDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
-  const { reports } = useReports();
-  const report = reports.find(r => r.id === id);
+  const [report, setReport] = useState<Report | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  if (!report) {
+  useEffect(() => {
+    if (!id || typeof id !== 'string') {
+      setIsLoading(false);
+      return;
+    }
+
+    const reportRef = doc(db, 'reports', id);
+    const unsubscribe = onSnapshot(reportRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        setReport(null);
+        setIsLoading(false);
+        return;
+      }
+
+      setReport({
+        id: snapshot.id,
+        ...snapshot.data(),
+      } as Report);
+      setIsLoading(false);
+    }, () => {
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [id]);
+
+  if (!report && !isLoading) {
     return (
       <View style={[styles.container, { paddingTop: (Platform.OS === 'web' ? 67 : insets.top) + 20 }]}>
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
@@ -78,6 +107,18 @@ export default function ReportDetailScreen() {
         </Card>
 
         <Card style={styles.section}>
+          <Text style={styles.sectionTitle}>Images</Text>
+          {report.beforeImage ? (
+            <Image source={{ uri: report.beforeImage }} style={styles.reportImage} />
+          ) : (
+            <View style={styles.imagePlaceholder}>
+              <Ionicons name="image-outline" size={28} color={Colors.gray300} />
+              <Text style={styles.imagePlaceholderText}>No before image</Text>
+            </View>
+          )}
+        </Card>
+
+        <Card style={styles.section}>
           <Text style={styles.sectionTitle}>AI Analysis</Text>
           <View style={styles.analysisRow}>
             <View style={styles.analysisItem}>
@@ -135,6 +176,9 @@ const styles = StyleSheet.create({
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
   address: { fontSize: 14, fontFamily: 'Inter_400Regular', color: Colors.gray700, flex: 1 },
   mapPreview: { height: 100, borderRadius: 12, backgroundColor: Colors.lightBlue, alignItems: 'center', justifyContent: 'center' },
+  reportImage: { width: '100%', height: 220, borderRadius: 12 },
+  imagePlaceholder: { height: 120, borderRadius: 12, backgroundColor: Colors.gray100, alignItems: 'center', justifyContent: 'center', gap: 6 },
+  imagePlaceholderText: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.gray400 },
   analysisRow: { flexDirection: 'row', alignItems: 'center' },
   analysisItem: { flex: 1, alignItems: 'center', gap: 2 },
   analysisValue: { fontSize: 28, fontFamily: 'Inter_700Bold', color: Colors.primary },
