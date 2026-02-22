@@ -9,6 +9,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { queryClient } from "@/lib/query-client";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ReportsProvider } from "@/contexts/ReportsContext";
+import "@/lib/firebase";
 
 SplashScreen.preventAutoHideAsync();
 
