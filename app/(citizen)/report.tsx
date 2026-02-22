@@ -6,6 +6,10 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import * as Crypto from 'expo-crypto';
+import * as ImagePicker from 'expo-image-picker';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { storage } from '@/lib/firebase';
+import { Image } from 'react-native';
 import { useReports, WasteType, Report } from '@/contexts/ReportsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Colors from '@/constants/colors';
@@ -26,41 +30,75 @@ export default function ReportWasteScreen() {
   const [description, setDescription] = useState('');
   const [selectedType, setSelectedType] = useState<WasteType | null>(null);
   const [address, setAddress] = useState('');
-  const [photoTaken, setPhotoTaken] = useState(false);
+  const [imageUri, setImageUri] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const canSubmit = title.trim() && selectedType && address.trim() && photoTaken;
+  const canSubmit = title.trim() && selectedType && address.trim() && imageUri;
 
-  const handleTakePhoto = () => {
-    setPhotoTaken(true);
-    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  const handleTakePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      alert('Sorry, we need camera permissions to make this work!');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.7,
+    });
+
+    if (!result.canceled) {
+      setImageUri(result.assets[0].uri);
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  };
+
+  const uploadImage = async (uri: string, reportId: string) => {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    const storageRef = ref(storage, `reports/${reportId}.jpg`);
+    await uploadBytes(storageRef, blob);
+    return await getDownloadURL(storageRef);
   };
 
   const handleSubmit = async () => {
-    if (!canSubmit || !selectedType) return;
+    if (!canSubmit || !selectedType || !imageUri) return;
     setIsSubmitting(true);
-    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    const confidence = Math.floor(Math.random() * 15) + 85;
-    const credits = Math.floor(Math.random() * 30) + 15;
-    const report: Report = {
-      id: Crypto.randomUUID(),
-      title: title.trim(),
-      description: description.trim(),
-      wasteType: selectedType,
-      status: 'pending',
-      priority: selectedType === 'hazardous' ? 'critical' : selectedType === 'electronic' ? 'high' : 'medium',
-      latitude: 28.6139 + Math.random() * 0.01,
-      longitude: 77.2090 + Math.random() * 0.01,
-      address: address.trim(),
-      createdAt: new Date().toISOString(),
-      aiConfidence: confidence,
-      creditsEarned: credits,
-    };
+    try {
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    await addReport(report);
-    await addCredits(credits);
-    router.push({ pathname: '/ai-verification', params: { confidence: confidence.toString(), credits: credits.toString(), wasteType: selectedType } });
+      const reportId = Crypto.randomUUID();
+      const imageUrl = await uploadImage(imageUri, reportId);
+
+      const confidence = Math.floor(Math.random() * 15) + 85;
+      const credits = Math.floor(Math.random() * 30) + 15;
+
+      const report: Omit<Report, 'id'> = {
+        title: title.trim(),
+        description: description.trim(),
+        wasteType: selectedType,
+        status: 'pending',
+        priority: selectedType === 'hazardous' ? 'critical' : selectedType === 'electronic' ? 'high' : 'medium',
+        latitude: 28.6139 + Math.random() * 0.01,
+        longitude: 77.2090 + Math.random() * 0.01,
+        address: address.trim(),
+        createdAt: new Date().toISOString(),
+        aiConfidence: confidence,
+        creditsEarned: credits,
+        beforeImage: imageUrl,
+      };
+
+      await addReport(report);
+      await addCredits(credits);
+      router.push({ pathname: '/ai-verification', params: { confidence: confidence.toString(), credits: credits.toString(), wasteType: selectedType } });
+    } catch (error) {
+      console.error('Error submitting report:', error);
+      alert('Failed to submit report. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -75,14 +113,16 @@ export default function ReportWasteScreen() {
 
       <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: (Platform.OS === 'web' ? 34 : insets.bottom) + 100 }]} showsVerticalScrollIndicator={false}>
         <Animated.View entering={FadeInDown.delay(100).duration(400)}>
-          <Pressable onPress={handleTakePhoto} style={[styles.photoArea, photoTaken && styles.photoAreaActive]}>
-            {photoTaken ? (
+          <Pressable onPress={handleTakePhoto} style={[styles.photoArea, imageUri && styles.photoAreaActive]}>
+            {imageUri ? (
               <View style={styles.photoTakenContent}>
-                <View style={styles.photoCheckCircle}>
-                  <Ionicons name="checkmark" size={28} color={Colors.white} />
+                <Image source={{ uri: imageUri }} style={styles.cameraPreview} />
+                <View style={styles.photoOverlay}>
+                  <View style={styles.photoCheckCircle}>
+                    <Ionicons name="checkmark" size={24} color={Colors.white} />
+                  </View>
+                  <Text style={styles.photoTakenText}>Photo captured</Text>
                 </View>
-                <Text style={styles.photoTakenText}>Photo captured</Text>
-                <Text style={styles.photoSubtext}>AI analysis ready</Text>
               </View>
             ) : (
               <>
@@ -177,4 +217,6 @@ const styles = StyleSheet.create({
   submitBtn: { backgroundColor: Colors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 52, borderRadius: 16, gap: 8 },
   submitBtnDisabled: { backgroundColor: Colors.gray200 },
   submitText: { fontSize: 16, fontFamily: 'Inter_700Bold', color: Colors.white },
+  cameraPreview: { width: '100%', height: 200, borderRadius: 16 },
+  photoOverlay: { position: 'absolute', bottom: 12, left: 12, right: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)', padding: 8, borderRadius: 12, gap: 8 },
 });

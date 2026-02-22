@@ -68,7 +68,7 @@ const styles = StyleSheet.create({
   topTitle: { fontSize: 24, fontFamily: 'Inter_700Bold', color: Colors.gray900 },
   mapPlaceholder: { flex: 1, margin: 16, borderRadius: 20, backgroundColor: Colors.lightBlue, overflow: 'hidden', position: 'relative' },
   mapGrid: { position: 'absolute', width: '100%', height: '100%' },
-  marker: { position: 'absolute', width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 3 },
+  marker: { position: 'absolute', width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', boxShadow: '0px 2px 4px rgba(0,0,0,0.2)', elevation: 3 },
   mapOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
   mapLabel: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.gray500 },
   mapSub: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.gray400 },

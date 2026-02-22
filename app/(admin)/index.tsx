@@ -12,14 +12,6 @@ import { MiniTrendChart } from '@/components/MiniTrendChart';
 import { AnimatedCounter } from '@/components/AnimatedCounter';
 import Colors from '@/constants/colors';
 
-const ACTIVITY_FEED = [
-  { id: '1', text: 'New critical complaint in Sector 8', time: '2m ago', icon: 'alert-circle' as const, color: Colors.danger },
-  { id: '2', text: 'Arjun Patel completed task #142', time: '15m ago', icon: 'checkmark-circle' as const, color: Colors.success },
-  { id: '3', text: 'Staff assigned to Zone B report', time: '32m ago', icon: 'person-add' as const, color: Colors.secondary },
-  { id: '4', text: 'New citizen report submitted', time: '1h ago', icon: 'document-text' as const, color: Colors.primary },
-  { id: '5', text: 'Weekly performance report ready', time: '2h ago', icon: 'analytics' as const, color: '#8B5CF6' },
-];
-
 export default function AdminDashboard() {
   const insets = useSafeAreaInsets();
   const { userName } = useAuth();
@@ -31,6 +23,47 @@ export default function AdminDashboard() {
   const resolutionRate = reports.length > 0 ? Math.round((resolvedCount / reports.length) * 100) : 0;
   const avgResponseTime = 4.2;
   const showCriticalAlert = criticalCount > 3;
+
+  const activityFeed = useMemo(() => reports.slice(0, 5).map((report) => {
+    const statusText = report.status.replace('_', ' ');
+    const icon = report.status === 'resolved'
+      ? 'checkmark-circle'
+      : report.priority === 'critical'
+        ? 'alert-circle'
+        : 'document-text';
+    const color = report.status === 'resolved'
+      ? Colors.success
+      : report.priority === 'critical'
+        ? Colors.danger
+        : Colors.primary;
+
+    return {
+      id: report.id,
+      text: `${report.title} (${statusText})`,
+      time: new Date(report.createdAt).toLocaleString(),
+      icon: icon as const,
+      color,
+    };
+  }), [reports]);
+
+  const heatmapCounts = useMemo(() => {
+    const days = 35;
+    const countsByDate = new Map<string, number>();
+
+    reports.forEach((report) => {
+      const createdDate = new Date(report.createdAt);
+      if (Number.isNaN(createdDate.getTime())) return;
+      const key = createdDate.toISOString().slice(0, 10);
+      countsByDate.set(key, (countsByDate.get(key) || 0) + 1);
+    });
+
+    return Array.from({ length: days }, (_, index) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (days - 1 - index));
+      const key = date.toISOString().slice(0, 10);
+      return countsByDate.get(key) || 0;
+    });
+  }, [reports]);
 
   const kpis = useMemo(() => [
     { label: 'Total Reports', value: reports.length, icon: 'document-text' as const, color: Colors.primary, trend: [12, 18, 15, 22, 25, 20, reports.length] },
@@ -103,8 +136,7 @@ export default function AdminDashboard() {
           <Card style={styles.heatmapCard}>
             <Text style={styles.cardTitle}>Complaint Heatmap</Text>
             <View style={styles.heatmapGrid}>
-              {Array.from({ length: 35 }).map((_, i) => {
-                const intensity = Math.random();
+              {heatmapCounts.map((count, i) => {
                 return (
                   <View
                     key={i}
@@ -112,9 +144,9 @@ export default function AdminDashboard() {
                       styles.heatmapCell,
                       {
                         backgroundColor:
-                          intensity > 0.7 ? Colors.danger + '80'
-                          : intensity > 0.4 ? Colors.warning + '60'
-                          : intensity > 0.2 ? Colors.success + '40'
+                          count >= 3 ? Colors.danger + '80'
+                          : count === 2 ? Colors.warning + '60'
+                          : count === 1 ? Colors.success + '40'
                           : Colors.gray200,
                       },
                     ]}
@@ -139,17 +171,29 @@ export default function AdminDashboard() {
             <Text style={styles.sectionTitle}>Live Activity</Text>
           </View>
           <Card style={styles.activityCard}>
-            {ACTIVITY_FEED.map((item, i) => (
-              <View key={item.id} style={[styles.activityRow, i > 0 && styles.activityBorder]}>
-                <View style={[styles.activityIcon, { backgroundColor: item.color + '15' }]}>
-                  <Ionicons name={item.icon} size={16} color={item.color} />
+            {activityFeed.length > 0 ? (
+              activityFeed.map((item, i) => (
+                <View key={item.id} style={[styles.activityRow, i > 0 && styles.activityBorder]}>
+                  <View style={[styles.activityIcon, { backgroundColor: item.color + '15' }]}>
+                    <Ionicons name={item.icon} size={16} color={item.color} />
+                  </View>
+                  <View style={styles.activityInfo}>
+                    <Text style={styles.activityText} numberOfLines={1}>{item.text}</Text>
+                    <Text style={styles.activityTime}>{item.time}</Text>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <View style={styles.activityRow}>
+                <View style={[styles.activityIcon, { backgroundColor: Colors.gray200 }]}>
+                  <Ionicons name="information-circle" size={16} color={Colors.gray500} />
                 </View>
                 <View style={styles.activityInfo}>
-                  <Text style={styles.activityText} numberOfLines={1}>{item.text}</Text>
-                  <Text style={styles.activityTime}>{item.time}</Text>
+                  <Text style={styles.activityText}>No activity yet</Text>
+                  <Text style={styles.activityTime}>Waiting for real reports</Text>
                 </View>
               </View>
-            ))}
+            )}
           </Card>
         </Animated.View>
 

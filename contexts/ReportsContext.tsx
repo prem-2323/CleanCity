@@ -1,5 +1,15 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { db } from '@/lib/firebase';
+import {
+  collection,
+  query,
+  orderBy,
+  onSnapshot,
+  addDoc,
+  updateDoc,
+  doc,
+  writeBatch
+} from 'firebase/firestore';
 
 export type ReportStatus = 'pending' | 'assigned' | 'in_progress' | 'resolved';
 export type ReportPriority = 'low' | 'medium' | 'high' | 'critical';
@@ -37,7 +47,7 @@ export interface StaffMember {
 interface ReportsContextValue {
   reports: Report[];
   staff: StaffMember[];
-  addReport: (report: Report) => Promise<void>;
+  addReport: (report: Omit<Report, 'id'>) => Promise<void>;
   updateReport: (id: string, updates: Partial<Report>) => Promise<void>;
   bulkUpdateReports: (ids: string[], updates: Partial<Report>) => Promise<void>;
   getReportsByStatus: (status: ReportStatus) => Report[];
@@ -47,88 +57,96 @@ interface ReportsContextValue {
 
 const ReportsContext = createContext<ReportsContextValue | null>(null);
 
-const SAMPLE_STAFF: StaffMember[] = [
-  { id: '1', name: 'Arjun Patel', rating: 4.8, tasksCompleted: 142, activeTasks: 3, maxTasks: 8, zone: 'Zone A', active: true },
-  { id: '2', name: 'Priya Sharma', rating: 4.6, tasksCompleted: 128, activeTasks: 2, maxTasks: 8, zone: 'Zone B', active: true },
-  { id: '3', name: 'Rahul Kumar', rating: 4.9, tasksCompleted: 167, activeTasks: 1, maxTasks: 8, zone: 'Zone A', active: true },
-  { id: '4', name: 'Sneha Reddy', rating: 4.5, tasksCompleted: 95, activeTasks: 4, maxTasks: 8, zone: 'Zone C', active: false },
-  { id: '5', name: 'Vikram Singh', rating: 4.7, tasksCompleted: 110, activeTasks: 2, maxTasks: 8, zone: 'Zone B', active: true },
-];
-
-const SAMPLE_REPORTS: Report[] = [
-  {
-    id: '1', title: 'Plastic waste near park', description: 'Large pile of plastic bags and bottles',
-    wasteType: 'plastic', status: 'pending', priority: 'high', latitude: 28.6139, longitude: 77.2090,
-    address: 'Central Park, Sector 12', createdAt: '2026-02-17T10:30:00Z', aiConfidence: 94, creditsEarned: 25,
-  },
-  {
-    id: '2', title: 'Electronic waste dump', description: 'Old monitors and keyboards discarded',
-    wasteType: 'electronic', status: 'assigned', priority: 'critical', latitude: 28.6200, longitude: 77.2150,
-    address: 'Industrial Area, Block C', createdAt: '2026-02-16T14:00:00Z', assignedTo: '1', aiConfidence: 89, creditsEarned: 40,
-  },
-  {
-    id: '3', title: 'Organic waste overflow', description: 'Garbage bin overflowing with food waste',
-    wasteType: 'organic', status: 'in_progress', priority: 'medium', latitude: 28.6100, longitude: 77.2050,
-    address: 'Market Road, Lane 4', createdAt: '2026-02-15T09:00:00Z', assignedTo: '3', aiConfidence: 97, creditsEarned: 15,
-  },
-  {
-    id: '4', title: 'Hazardous chemical containers', description: 'Paint cans and chemical bottles',
-    wasteType: 'hazardous', status: 'resolved', priority: 'critical', latitude: 28.6180, longitude: 77.2120,
-    address: 'Factory Road, Sector 8', createdAt: '2026-02-14T16:45:00Z', assignedTo: '2', aiConfidence: 91, creditsEarned: 50,
-  },
-  {
-    id: '5', title: 'Mixed waste on sidewalk', description: 'Various waste materials blocking walkway',
-    wasteType: 'mixed', status: 'pending', priority: 'low', latitude: 28.6150, longitude: 77.2080,
-    address: 'Residential Block, Sector 15', createdAt: '2026-02-13T11:20:00Z', aiConfidence: 85, creditsEarned: 10,
-  },
-];
-
 export function ReportsProvider({ children }: { children: ReactNode }) {
   const [reports, setReports] = useState<Report[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [reportsLoaded, setReportsLoaded] = useState(false);
+  const [staffLoaded, setStaffLoaded] = useState(false);
 
   useEffect(() => {
-    loadReports();
+    const reportsQuery = query(collection(db, 'reports'), orderBy('createdAt', 'desc'));
+    const staffQuery = query(collection(db, 'staff'), orderBy('name', 'asc'));
+
+    const unsubscribeReports = onSnapshot(reportsQuery,
+      async (snapshot) => {
+        const reportData = snapshot.docs.map(docItem => ({
+          id: docItem.id,
+          ...docItem.data()
+        })) as Report[];
+
+        setReports(reportData);
+        setReportsLoaded(true);
+      },
+      (error) => {
+        console.error("Firestore Snapshot Error:", error.message);
+        setReportsLoaded(true);
+      }
+    );
+
+    const unsubscribeStaff = onSnapshot(staffQuery,
+      (snapshot) => {
+        const staffData = snapshot.docs.map(docItem => ({
+          id: docItem.id,
+          ...docItem.data()
+        })) as StaffMember[];
+        setStaff(staffData);
+        setStaffLoaded(true);
+      },
+      (error) => {
+        console.error("Firestore Staff Snapshot Error:", error.message);
+        setStaffLoaded(true);
+      }
+    );
+
+    return () => {
+      unsubscribeReports();
+      unsubscribeStaff();
+    };
   }, []);
 
-  const loadReports = async () => {
-    try {
-      const stored = await AsyncStorage.getItem('reports');
-      if (stored) {
-        setReports(JSON.parse(stored));
-      } else {
-        setReports(SAMPLE_REPORTS);
-        await AsyncStorage.setItem('reports', JSON.stringify(SAMPLE_REPORTS));
-      }
-    } catch {
-      setReports(SAMPLE_REPORTS);
+  useEffect(() => {
+    if (reportsLoaded && staffLoaded) {
+      setIsLoading(false);
     }
-    setIsLoading(false);
-  };
+  }, [reportsLoaded, staffLoaded]);
 
-  const addReport = async (report: Report) => {
-    const updated = [report, ...reports];
-    setReports(updated);
-    await AsyncStorage.setItem('reports', JSON.stringify(updated));
+  const addReport = async (report: Omit<Report, 'id'>) => {
+    try {
+      await addDoc(collection(db, 'reports'), {
+        ...report,
+        createdAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error adding report:', error);
+    }
   };
 
   const updateReport = async (id: string, updates: Partial<Report>) => {
-    const updated = reports.map(r => r.id === id ? { ...r, ...updates } : r);
-    setReports(updated);
-    await AsyncStorage.setItem('reports', JSON.stringify(updated));
+    try {
+      await updateDoc(doc(db, 'reports', id), updates);
+    } catch (error) {
+      console.error('Error updating report:', error);
+    }
   };
 
   const bulkUpdateReports = async (ids: string[], updates: Partial<Report>) => {
-    const idSet = new Set(ids);
-    const updated = reports.map(r => idSet.has(r.id) ? { ...r, ...updates } : r);
-    setReports(updated);
-    await AsyncStorage.setItem('reports', JSON.stringify(updated));
+    try {
+      const batch = writeBatch(db);
+      ids.forEach(id => {
+        const reportRef = doc(db, 'reports', id);
+        batch.update(reportRef, updates);
+      });
+      await batch.commit();
+    } catch (error) {
+      console.error('Error bulk updating reports:', error);
+    }
   };
 
   const getReportsByStatus = (status: ReportStatus) => reports.filter(r => r.status === status);
 
   const getBestAvailableStaff = (): StaffMember | null => {
-    const available = SAMPLE_STAFF.filter(s => s.active && s.activeTasks < s.maxTasks);
+    const available = staff.filter(s => s.active && s.activeTasks < s.maxTasks);
     if (available.length === 0) return null;
     return available.sort((a, b) => {
       const workloadA = a.activeTasks / a.maxTasks;
@@ -139,8 +157,8 @@ export function ReportsProvider({ children }: { children: ReactNode }) {
   };
 
   const value = useMemo(() => ({
-    reports, staff: SAMPLE_STAFF, addReport, updateReport, bulkUpdateReports, getReportsByStatus, getBestAvailableStaff, isLoading,
-  }), [reports, isLoading]);
+    reports, staff, addReport, updateReport, bulkUpdateReports, getReportsByStatus, getBestAvailableStaff, isLoading,
+  }), [reports, staff, isLoading]);
 
   return <ReportsContext.Provider value={value}>{children}</ReportsContext.Provider>;
 }

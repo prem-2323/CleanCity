@@ -20,10 +20,7 @@ const Colors = {
   gray800: '#1E293B',
   gray900: '#0F172A',
   cardShadow: {
-    shadowColor: '#1E3A8A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
+    boxShadow: '0px 2px 12px rgba(30, 58, 138, 0.08)',
     elevation: 3,
   },
   light: {

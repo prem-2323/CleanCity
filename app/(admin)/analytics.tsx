@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -149,17 +149,81 @@ export default function AnalyticsScreen() {
   const insets = useSafeAreaInsets();
   const { reports, staff } = useReports();
 
+  const weeklyData = useMemo(() => {
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = new Date();
+      day.setHours(0, 0, 0, 0);
+      day.setDate(day.getDate() - (6 - index));
+      const nextDay = new Date(day);
+      nextDay.setDate(nextDay.getDate() + 1);
+
+      return reports.filter((report) => {
+        const createdAt = new Date(report.createdAt);
+        return createdAt >= day && createdAt < nextDay;
+      }).length;
+    });
+  }, [reports]);
+
+  const weeklyLabels = useMemo(() => {
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = new Date();
+      day.setDate(day.getDate() - (6 - index));
+      return day.toLocaleDateString(undefined, { weekday: 'short' });
+    });
+  }, []);
+
+  const monthlyTrendData = useMemo(() => {
+    return Array.from({ length: 12 }, (_, index) => {
+      const monthDate = new Date();
+      monthDate.setDate(1);
+      monthDate.setMonth(monthDate.getMonth() - (11 - index));
+
+      const nextMonth = new Date(monthDate);
+      nextMonth.setMonth(nextMonth.getMonth() + 1);
+
+      return reports.filter((report) => {
+        const createdAt = new Date(report.createdAt);
+        return createdAt >= monthDate && createdAt < nextMonth;
+      }).length;
+    });
+  }, [reports]);
+
+  const monthlyLabels = useMemo(() => {
+    return Array.from({ length: 6 }, (_, index) => {
+      const monthDate = new Date();
+      monthDate.setDate(1);
+      monthDate.setMonth(monthDate.getMonth() - (10 - index * 2));
+      return monthDate.toLocaleDateString(undefined, { month: 'short' });
+    });
+  }, []);
+
   const byType = ['plastic', 'organic', 'hazardous', 'electronic', 'mixed'].map(type => ({
     label: type.charAt(0).toUpperCase() + type.slice(1),
     value: reports.filter(r => r.wasteType === type).length,
     color: type === 'plastic' ? '#3B82F6' : type === 'organic' ? '#10B981' : type === 'hazardous' ? '#EF4444' : type === 'electronic' ? '#8B5CF6' : '#F59E0B',
   }));
 
-  const zoneData = [
-    { zone: 'Zone A', resolved: 42, total: 55, color: Colors.success },
-    { zone: 'Zone B', resolved: 28, total: 40, color: Colors.secondary },
-    { zone: 'Zone C', resolved: 15, total: 30, color: Colors.warning },
-  ];
+  const zoneData = useMemo(() => {
+    const zoneStats = new Map<string, { resolved: number; total: number }>();
+
+    reports.forEach((report) => {
+      const zoneMatch = report.address?.match(/zone\s*([a-z0-9]+)/i);
+      const zone = zoneMatch ? `Zone ${zoneMatch[1].toUpperCase()}` : 'Other';
+      const current = zoneStats.get(zone) || { resolved: 0, total: 0 };
+      current.total += 1;
+      if (report.status === 'resolved') current.resolved += 1;
+      zoneStats.set(zone, current);
+    });
+
+    const palette = [Colors.success, Colors.secondary, Colors.warning, Colors.primary];
+
+    return Array.from(zoneStats.entries()).map(([zone, stats], index) => ({
+      zone,
+      resolved: stats.resolved,
+      total: stats.total,
+      color: palette[index % palette.length],
+    }));
+  }, [reports]);
 
   const handleExportPDF = () => {
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -175,7 +239,7 @@ export default function AnalyticsScreen() {
             <Text style={styles.chartTitle}>Weekly Reports</Text>
             <Ionicons name="bar-chart" size={18} color={Colors.gray400} />
           </View>
-          <BarChart data={[8, 12, 6, 15, 10, 18, 14]} labels={['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']} />
+          <BarChart data={weeklyData} labels={weeklyLabels} />
         </Card>
       </Animated.View>
 
@@ -186,8 +250,8 @@ export default function AnalyticsScreen() {
             <Ionicons name="trending-up" size={18} color={Colors.gray400} />
           </View>
           <LineChart
-            data={[18, 25, 30, 22, 35, 42, 38, 45, 50, 48, 55, 60]}
-            labels={['Jan', 'Mar', 'May', 'Jul', 'Sep', 'Nov']}
+            data={monthlyTrendData}
+            labels={monthlyLabels}
             color={Colors.primary}
           />
         </Card>
@@ -209,9 +273,11 @@ export default function AnalyticsScreen() {
             <Text style={styles.chartTitle}>Zone Performance</Text>
             <Ionicons name="map" size={18} color={Colors.gray400} />
           </View>
-          {zoneData.map((zone) => (
+          {zoneData.length > 0 ? zoneData.map((zone) => (
             <ZonePerformanceBar key={zone.zone} {...zone} />
-          ))}
+          )) : (
+            <Text style={styles.emptyText}>No zone data available yet</Text>
+          )}
         </Card>
       </Animated.View>
 
@@ -271,4 +337,5 @@ const styles = StyleSheet.create({
   exportRow: { flexDirection: 'row', gap: 12, marginTop: 8 },
   exportBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 16, borderWidth: 1.5, borderColor: Colors.primary },
   exportText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.primary },
+  emptyText: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.gray500 },
 });

@@ -168,5 +168,5 @@ const styles = StyleSheet.create({
   statItem: { alignItems: 'center' },
   statValue: { fontSize: 24, fontFamily: 'Inter_700Bold', color: Colors.primary },
   statLabel: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.gray500, marginTop: 2 },
-  fab: { position: 'absolute', bottom: 100, right: 20, width: 56, height: 56, borderRadius: 18, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center', ...Colors.cardShadow, shadowOpacity: 0.2 },
+  fab: { position: 'absolute', bottom: 100, right: 20, width: 56, height: 56, borderRadius: 18, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center', ...Colors.cardShadow },
 });
