@@ -89,4 +89,8 @@ npx expo start --web --clear
 
 
 
- npx expo start --web --port 8081
+Terminal 1: Frontend Web
+npm run start
+
+Terminal 2: Backend
+npx tsx --env-file=.env server/index.ts
