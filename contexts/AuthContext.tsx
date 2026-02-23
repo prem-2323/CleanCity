@@ -5,6 +5,7 @@ import { auth, db } from '@/lib/firebase';
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   fetchSignInMethodsForEmail,
   signOut,
   User as FirebaseUser,
@@ -58,37 +59,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    // Check if we just returned from a Google redirect
-    getRedirectResult(auth).then(async (result) => {
-      if (result) {
-        const firebaseUser = result.user;
-        const pendingRole = (await AsyncStorage.getItem(PENDING_GOOGLE_ROLE_KEY)) as UserRole | null;
-        const resolvedRole: UserRole = pendingRole === 'admin' || pendingRole === 'cleaner' || pendingRole === 'citizen' ? pendingRole : 'citizen';
+    // Check if we just returned from a Google redirect (web only)
+    if (Platform.OS === 'web' && typeof getRedirectResult === 'function') {
+      getRedirectResult(auth).then(async (result) => {
+        if (result) {
+          const firebaseUser = result.user;
+          const pendingRole = (await AsyncStorage.getItem(PENDING_GOOGLE_ROLE_KEY)) as UserRole | null;
+          const resolvedRole: UserRole = pendingRole === 'admin' || pendingRole === 'cleaner' || pendingRole === 'citizen' ? pendingRole : 'citizen';
 
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-        if (!userDoc.exists()) {
-          // Initialize Firestore document for new Google user
-          await setDoc(doc(db, 'users', firebaseUser.uid), {
-            name: firebaseUser.displayName || 'Google User',
-            role: resolvedRole,
-            email: firebaseUser.email,
-            credits: 150,
-            createdAt: new Date().toISOString()
-          });
-        } else {
-          const userData = userDoc.data();
-          if (!userData.role && resolvedRole) {
-            await updateDoc(doc(db, 'users', firebaseUser.uid), {
+          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          if (!userDoc.exists()) {
+            // Initialize Firestore document for new Google user
+            await setDoc(doc(db, 'users', firebaseUser.uid), {
+              name: firebaseUser.displayName || 'Google User',
               role: resolvedRole,
+              email: firebaseUser.email,
+              credits: 150,
+              createdAt: new Date().toISOString()
             });
+          } else {
+            const userData = userDoc.data();
+            if (!userData.role && resolvedRole) {
+              await updateDoc(doc(db, 'users', firebaseUser.uid), {
+                role: resolvedRole,
+              });
+            }
           }
-        }
 
-        await AsyncStorage.removeItem(PENDING_GOOGLE_ROLE_KEY);
-      }
-    }).catch((error) => {
-      console.error("Redirect login error:", error);
-    });
+          await AsyncStorage.removeItem(PENDING_GOOGLE_ROLE_KEY);
+        }
+      }).catch((error) => {
+        console.error("Redirect login error:", error);
+      });
+    }
 
     // Listen for auth state changes
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -208,13 +211,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           signInErrorCode === 'auth/invalid-login-credentials' ||
           signInErrorCode === 'auth/wrong-password'
         ) {
-          const methods = await fetchSignInMethodsForEmail(auth, email).catch(() => [] as string[]);
+          // Try creating a new account (sign-up)
+          try {
+            const createResult = await createUserWithEmailAndPassword(auth, email, password);
+            firebaseUser = createResult.user;
 
-          if (methods.includes('google.com')) {
-            throw new Error('This account uses Google sign-in. Please use "Sign in with Google".');
+            const resolvedRole: UserRole = role || 'citizen';
+            const resolvedName = name || email.split('@')[0] || 'User';
+
+            await setDoc(doc(db, 'users', firebaseUser.uid), {
+              name: resolvedName,
+              role: resolvedRole,
+              email,
+              credits: 150,
+              createdAt: new Date().toISOString(),
+            });
+
+            return resolvedRole;
+          } catch (createError: any) {
+            if (createError?.code === 'auth/email-already-in-use') {
+              throw new Error('Invalid email or password.');
+            }
+            if (createError?.code === 'auth/weak-password') {
+              throw new Error('Password must be at least 6 characters.');
+            }
+            throw new Error('Invalid email or password.');
           }
-
-          throw new Error('Invalid email or password.');
         }
 
         throw signInError;

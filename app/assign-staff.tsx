@@ -8,6 +8,8 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useReports, StaffMember } from '@/contexts/ReportsContext';
 import { Card } from '@/components/Card';
 import Colors from '@/constants/colors';
+import { db } from '@/lib/firebase';
+import { doc, updateDoc } from 'firebase/firestore';
 
 function WorkloadBar({ current, max }: { current: number; max: number }) {
   const pct = Math.min((current / max) * 100, 100);
@@ -39,6 +41,11 @@ export default function AssignStaffScreen() {
     if (!selectedStaff || !reportId) return;
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     await updateReport(reportId as string, { status: 'assigned', assignedTo: selectedStaff });
+    // Increment assigned staff's active tasks
+    const staffMember = staff.find(s => s.id === selectedStaff);
+    if (staffMember) {
+      await updateDoc(doc(db, 'staff', selectedStaff), { activeTasks: staffMember.activeTasks + 1 });
+    }
     router.back();
   };
 
@@ -48,6 +55,8 @@ export default function AssignStaffScreen() {
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setSelectedStaff(best.id);
     await updateReport(reportId as string, { status: 'assigned', assignedTo: best.id });
+    // Increment assigned staff's active tasks
+    await updateDoc(doc(db, 'staff', best.id), { activeTasks: best.activeTasks + 1 });
     router.back();
   };
 

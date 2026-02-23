@@ -94,7 +94,6 @@ export default function LoginScreen() {
           <TextInput
             style={styles.input}
             nativeID="fullName"
-            name="fullName"
             placeholder="Enter your name"
             placeholderTextColor={Colors.gray400}
             value={name}
@@ -112,7 +111,6 @@ export default function LoginScreen() {
           <TextInput
             style={styles.input}
             nativeID="email"
-            name="email"
             placeholder="Enter your email"
             placeholderTextColor={Colors.gray400}
             value={email}
@@ -131,7 +129,6 @@ export default function LoginScreen() {
           <TextInput
             style={styles.input}
             nativeID="password"
-            name="password"
             placeholder="Enter your password"
             placeholderTextColor={Colors.gray400}
             value={password}

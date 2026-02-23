@@ -1,0 +1,58 @@
+import { Platform } from 'react-native';
+
+type AnalyzeRequest = {
+  imageSource: string;
+  title: string;
+  description?: string;
+};
+
+type VerifyRequest = {
+  beforeImageSource?: string;
+  afterImageSource: string;
+  severityScore: number;
+};
+
+function resolveApiBaseUrl(): string {
+  const explicit = process.env.EXPO_PUBLIC_API_URL;
+  if (explicit) {
+    return explicit;
+  }
+
+  const domain = process.env.EXPO_PUBLIC_DOMAIN;
+  if (domain) {
+    if (domain.startsWith('http://') || domain.startsWith('https://')) {
+      return domain;
+    }
+    return `https://${domain}`;
+  }
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+
+  return 'http://localhost:5000';
+}
+
+async function postJson<TResponse>(endpoint: string, body: unknown): Promise<TResponse> {
+  const baseUrl = resolveApiBaseUrl();
+  const response = await fetch(`${baseUrl}${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Request failed with status ${response.status}`);
+  }
+
+  return (await response.json()) as TResponse;
+}
+
+export function analyzeWasteApi<TResponse>(payload: AnalyzeRequest): Promise<TResponse> {
+  return postJson<TResponse>('/api/ai/analyze', payload);
+}
+
+export function verifyCleanupApi<TResponse>(payload: VerifyRequest): Promise<TResponse> {
+  return postJson<TResponse>('/api/ai/verify-cleanup', payload);
+}

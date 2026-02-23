@@ -1,15 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Platform, Image } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Report } from '@/contexts/ReportsContext';
 import { StatusBadge, PriorityBadge } from '@/components/StatusBadge';
 import { Card } from '@/components/Card';
+import ReportMapView from '@/components/ReportMapView';
 import Colors from '@/constants/colors';
 import { db } from '@/lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { Image } from 'react-native';
 
 export default function ReportDetailScreen() {
   const insets = useSafeAreaInsets();
@@ -52,6 +52,19 @@ export default function ReportDetailScreen() {
         <View style={styles.emptyState}>
           <Ionicons name="alert-circle-outline" size={48} color={Colors.gray300} />
           <Text style={styles.emptyText}>Report not found</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (isLoading || !report) {
+    return (
+      <View style={[styles.container, { paddingTop: (Platform.OS === 'web' ? 67 : insets.top) + 20 }]}>
+        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={22} color={Colors.gray800} />
+        </Pressable>
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyText}>Loading report...</Text>
         </View>
       </View>
     );
@@ -102,7 +115,26 @@ export default function ReportDetailScreen() {
             <Text style={styles.address}>{report.address}</Text>
           </View>
           <View style={styles.mapPreview}>
-            <Ionicons name="map-outline" size={32} color={Colors.gray300} />
+            <ReportMapView
+              markers={[
+                {
+                  id: report.id,
+                  latitude: report.latitude,
+                  longitude: report.longitude,
+                  title: report.title,
+                  description: report.address,
+                  color: Colors.primary,
+                },
+              ]}
+              userLocation={null}
+              showUserRadius={false}
+              initialRegion={{
+                latitude: report.latitude,
+                longitude: report.longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+              }}
+            />
           </View>
         </Card>
 
@@ -131,6 +163,21 @@ export default function ReportDetailScreen() {
               <Text style={styles.analysisLabel}>Credits Earned</Text>
             </View>
           </View>
+          {!!report.severityScore && (
+            <View style={styles.severityRow}>
+              <Text style={styles.severityLabel}>Severity Score</Text>
+              <Text style={styles.severityValue}>{report.severityScore}/100</Text>
+            </View>
+          )}
+          {!!report.detectedObjects?.length && (
+            <Text style={styles.detectedText}>Detected: {report.detectedObjects.join(', ')}</Text>
+          )}
+          {report.cleanupVerification?.verified && (
+            <View style={styles.cleanupVerified}>
+              <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
+              <Text style={styles.cleanupVerifiedText}>Cleanup AI Verified ({report.cleanupVerification.cleanupScore}%)</Text>
+            </View>
+          )}
         </Card>
 
         <Card style={styles.section}>
@@ -184,6 +231,12 @@ const styles = StyleSheet.create({
   analysisValue: { fontSize: 28, fontFamily: 'Inter_700Bold', color: Colors.primary },
   analysisLabel: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.gray500 },
   analysisDivider: { width: 1, height: 40, backgroundColor: Colors.gray200 },
+  severityRow: { marginTop: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  severityLabel: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.gray600 },
+  severityValue: { fontSize: 16, fontFamily: 'Inter_700Bold', color: Colors.primary },
+  detectedText: { marginTop: 8, fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.gray500 },
+  cleanupVerified: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  cleanupVerifiedText: { fontSize: 12, fontFamily: 'Inter_600SemiBold', color: Colors.success },
   timelineItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
   timelineDot: { width: 10, height: 10, borderRadius: 5 },
   timelineLabel: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.gray800 },

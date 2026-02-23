@@ -20,7 +20,7 @@ export function AnimatedCounter({ value, duration = 1200, style, prefix = '', su
   }, [value]);
 
   const animatedProps = useAnimatedProps(() => {
-    return { text: `${prefix}${Math.round(animatedValue.value)}${suffix}` } as { text: string };
+    return { text: `${prefix}${Math.round(animatedValue.value)}${suffix}` } as any;
   });
 
   return (

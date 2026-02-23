@@ -1,17 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Platform, Image } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
+import * as Linking from 'expo-linking';
+import * as Crypto from 'expo-crypto';
 import { useReports, Report } from '@/contexts/ReportsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { StatusBadge, PriorityBadge } from '@/components/StatusBadge';
 import { Card } from '@/components/Card';
 import Colors from '@/constants/colors';
-import { db } from '@/lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { Image } from 'react-native';
+import { db, storage } from '@/lib/firebase';
+import { doc, onSnapshot, updateDoc, increment } from 'firebase/firestore';
+import { verifyCleanup } from '@/lib/ai-pipeline';
+import { verifyCleanupApi } from '@/lib/ai-api';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 export default function TaskDetailScreen() {
   const insets = useSafeAreaInsets();
@@ -20,6 +25,8 @@ export default function TaskDetailScreen() {
   const { addCredits } = useAuth();
   const [report, setReport] = useState<Report | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [afterImageUri, setAfterImageUri] = useState<string | null>(null);
+  const [isCompleting, setIsCompleting] = useState(false);
 
   useEffect(() => {
     if (!id || typeof id !== 'string') {
@@ -54,19 +61,119 @@ export default function TaskDetailScreen() {
     { id: '4', label: 'Took after photo', done: false },
   ]);
 
-  const allDone = checklist.every(c => c.done);
+  const allDone = checklist.every(c => c.done) && !!afterImageUri;
 
   const toggleItem = (itemId: string) => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setChecklist(prev => prev.map(c => c.id === itemId ? { ...c, done: !c.done } : c));
+
+    // Mark report as in_progress when cleaner starts checklist
+    if (report && report.status === 'assigned') {
+      updateReport(report.id, { status: 'in_progress' }).catch(() => {});
+    }
+  };
+
+  const handleTakeAfterPhoto = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (permission.status !== 'granted') {
+      alert('Camera access is required to verify cleanup.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.7,
+    });
+
+    if (!result.canceled) {
+      setAfterImageUri(result.assets[0].uri);
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  };
+
+  const handleNavigate = async () => {
+    if (!report) return;
+    const url = `https://www.google.com/maps/search/?api=1&query=${report.latitude},${report.longitude}`;
+    await Linking.openURL(url);
+  };
+
+  const uploadAfterImage = async (uri: string, reportId: string) => {
+    if (Platform.OS === 'web') {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('Failed to process image on web'));
+        reader.readAsDataURL(blob);
+      });
+
+      return dataUrl;
+    }
+
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    const storageRef = ref(storage, `reports/${reportId}-after.jpg`);
+    await uploadBytes(storageRef, blob);
+    return await getDownloadURL(storageRef);
   };
 
   const handleComplete = async () => {
-    if (!report) return;
-    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    await updateReport(report.id, { status: 'resolved' });
-    await addCredits(30);
-    router.back();
+    if (!report || !afterImageUri) return;
+    setIsCompleting(true);
+
+    try {
+      const afterImageUrl = await uploadAfterImage(afterImageUri, report.id || Crypto.randomUUID());
+
+      const verification = await verifyCleanupApi<Awaited<ReturnType<typeof verifyCleanup>>>({
+        beforeImageSource: report.beforeImage,
+        afterImageSource: afterImageUrl,
+        severityScore: report.severityScore || 60,
+      }).catch(() => verifyCleanup({
+        beforeImageUri: report.beforeImage,
+        afterImageUri,
+        wasteType: report.wasteType,
+        severityScore: report.severityScore || 60,
+      }));
+
+      if (!verification.verified) {
+        alert(`Cleanup verification failed (${verification.cleanupScore}%). Please recapture and clean remaining waste.`);
+        return;
+      }
+
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await updateReport(report.id, {
+        status: 'resolved',
+        afterImage: afterImageUrl,
+        cleanupVerification: {
+          verified: verification.verified,
+          similarityScore: verification.similarityScore,
+          cleanupScore: verification.cleanupScore,
+          checkedAt: new Date().toISOString(),
+        },
+        modelTrace: [...(report.modelTrace || []), ...verification.modelTrace],
+      });
+
+      // Decrement staff activeTasks and increment tasksCompleted
+      if (report.assignedTo) {
+        try {
+          const staffRef = doc(db, 'staff', report.assignedTo);
+          await updateDoc(staffRef, {
+            activeTasks: increment(-1),
+            tasksCompleted: increment(1),
+          });
+        } catch (staffErr) {
+          console.warn('Could not update staff stats:', staffErr);
+        }
+      }
+
+      await addCredits(verification.rewardCredits);
+      router.back();
+    } finally {
+      setIsCompleting(false);
+    }
   };
 
   if (isLoading) {
@@ -133,6 +240,24 @@ export default function TaskDetailScreen() {
         </Card>
 
         <Card style={styles.section}>
+          <Text style={styles.sectionTitle}>After Cleanup Photo</Text>
+          {afterImageUri ? (
+            <Image source={{ uri: afterImageUri }} style={styles.afterImage} />
+          ) : (
+            <Pressable onPress={handleTakeAfterPhoto} style={styles.photoCapture}>
+              <Ionicons name="camera" size={22} color={Colors.primary} />
+              <Text style={styles.photoCaptureText}>Capture after photo</Text>
+            </Pressable>
+          )}
+          {afterImageUri && (
+            <Pressable onPress={handleTakeAfterPhoto} style={styles.retakeBtn}>
+              <Ionicons name="refresh" size={14} color={Colors.secondary} />
+              <Text style={styles.retakeText}>Retake</Text>
+            </Pressable>
+          )}
+        </Card>
+
+        <Card style={styles.section}>
           <Text style={styles.sectionTitle}>Cleanup Checklist</Text>
           {checklist.map((item) => (
             <Pressable key={item.id} style={styles.checkItem} onPress={() => toggleItem(item.id)}>
@@ -145,6 +270,7 @@ export default function TaskDetailScreen() {
         </Card>
 
         <Pressable
+          onPress={handleNavigate}
           style={({ pressed }) => [styles.navBtn, pressed && { opacity: 0.9 }]}
         >
           <Ionicons name="navigate" size={18} color={Colors.white} />
@@ -155,11 +281,11 @@ export default function TaskDetailScreen() {
       <View style={[styles.bottomBar, { paddingBottom: (Platform.OS === 'web' ? 34 : insets.bottom) + 12 }]}>
         <Pressable
           onPress={handleComplete}
-          disabled={!allDone}
-          style={({ pressed }) => [styles.completeBtn, !allDone && styles.completeBtnDisabled, pressed && allDone && { opacity: 0.9 }]}
+          disabled={!allDone || isCompleting}
+          style={({ pressed }) => [styles.completeBtn, (!allDone || isCompleting) && styles.completeBtnDisabled, pressed && allDone && !isCompleting && { opacity: 0.9 }]}
         >
           <Ionicons name="checkmark-circle" size={20} color={allDone ? Colors.white : Colors.gray400} />
-          <Text style={[styles.completeBtnText, !allDone && { color: Colors.gray400 }]}>Mark as Complete</Text>
+          <Text style={[styles.completeBtnText, !allDone && { color: Colors.gray400 }]}>{isCompleting ? 'Verifying...' : 'Mark as Complete'}</Text>
         </Pressable>
       </View>
     </View>
@@ -180,7 +306,12 @@ const styles = StyleSheet.create({
   section: { marginBottom: 12 },
   sectionTitle: { fontSize: 15, fontFamily: 'Inter_700Bold', color: Colors.gray900, marginBottom: 12 },
   photoPlaceholder: { height: 150, borderRadius: 14, backgroundColor: Colors.gray100, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  photoCapture: { height: 130, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.primary, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: Colors.lightBlue },
+  photoCaptureText: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.primary },
+  retakeBtn: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: Colors.lightBlue },
+  retakeText: { fontSize: 12, fontFamily: 'Inter_600SemiBold', color: Colors.secondary },
   reportImage: { width: '100%', height: '100%', borderRadius: 14 },
+  afterImage: { width: '100%', height: 170, borderRadius: 14 },
   photoLabel: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.gray400 },
   checkItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.gray100 },
   checkbox: { width: 24, height: 24, borderRadius: 8, borderWidth: 2, borderColor: Colors.gray300, alignItems: 'center', justifyContent: 'center' },

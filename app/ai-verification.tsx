@@ -1,19 +1,26 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Platform, ActivityIndicator, ScrollView } from 'react-native';
+import { useEffect, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import Animated, { useSharedValue, useAnimatedStyle, withDelay, withTiming, withSpring, Easing, FadeInDown } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, withSpring, FadeInDown } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
+import Colors from '@/constants/colors';
 import { CircularProgress } from '@/components/CircularProgress';
 import { Card } from '@/components/Card';
-import Colors from '@/constants/colors';
 
-const CHECKLIST = ['Image quality verified', 'Waste type detected', 'Location confirmed', 'Priority assigned', 'Credits calculated'];
+const CHECKLIST = [
+  { label: 'MobileNetV2: Waste vs Non-Waste validated', icon: 'shield-checkmark' as const },
+  { label: 'YOLOv8: Waste type identified', icon: 'scan' as const },
+  { label: 'YOLOv8: Severity estimated', icon: 'analytics' as const },
+  { label: 'Google Maps: Location pinned', icon: 'location' as const },
+  { label: 'Priority and credits finalized', icon: 'ribbon' as const },
+];
 
 export default function AIVerificationScreen() {
   const insets = useSafeAreaInsets();
-  const { confidence, credits, wasteType } = useLocalSearchParams();
+  const { confidence, credits, wasteType, severity, severityScore } = useLocalSearchParams();
   const [completedItems, setCompletedItems] = useState<number>(0);
   const [showResult, setShowResult] = useState(false);
 
@@ -38,7 +45,7 @@ export default function AIVerificationScreen() {
       });
     }, 600);
     return () => clearInterval(timer);
-  }, []);
+  }, [resultOpacity, resultScale]);
 
   const resultStyle = useAnimatedStyle(() => ({
     transform: [{ scale: resultScale.value }],
@@ -62,7 +69,12 @@ export default function AIVerificationScreen() {
                 <View style={styles.pendingDot} />
               )}
             </View>
-            <Text style={[styles.checkText, i < completedItems && styles.checkTextDone]}>{item}</Text>
+            <View style={styles.checkTextWrap}>
+              <Text style={[styles.checkText, i < completedItems && styles.checkTextDone]}>{item.label}</Text>
+              {i < completedItems && (
+                <Text style={styles.checkPass}>PASS</Text>
+              )}
+            </View>
           </Animated.View>
         ))}
       </View>
@@ -87,6 +99,15 @@ export default function AIVerificationScreen() {
                 <Text style={styles.creditsAmount}>+{credits || '25'}</Text>
               </View>
             </View>
+
+            <View style={styles.severityCard}>
+              <View style={styles.severityHead}>
+                <Ionicons name="flash" size={18} color={Colors.white} />
+                <Text style={styles.severityHeadText}>Incident Severity</Text>
+              </View>
+              <Text style={styles.severityValue}>{String(severity || 'medium').toUpperCase()}</Text>
+              <Text style={styles.severityScore}>Score: {severityScore || '60'}/100</Text>
+            </View>
           </Card>
 
           <Pressable
@@ -110,8 +131,10 @@ const styles = StyleSheet.create({
   checkIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   checkIconDone: { backgroundColor: Colors.success },
   checkIconPending: { backgroundColor: Colors.gray200 },
-  checkText: { fontSize: 15, fontFamily: 'Inter_500Medium', color: Colors.gray500 },
+  checkTextWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  checkText: { fontSize: 15, fontFamily: 'Inter_500Medium', color: Colors.gray500, flex: 1 },
   checkTextDone: { color: Colors.gray800 },
+  checkPass: { fontSize: 11, fontFamily: 'Inter_700Bold', color: Colors.success, marginLeft: 8 },
   spinner: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: Colors.secondary, borderTopColor: 'transparent' },
   pendingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.gray400 },
   resultContainer: { flex: 1, justifyContent: 'center', gap: 16 },
@@ -124,6 +147,11 @@ const styles = StyleSheet.create({
   creditsEarned: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: Colors.warning + '10', padding: 16, borderRadius: 14 },
   creditsTitle: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.gray500 },
   creditsAmount: { fontSize: 24, fontFamily: 'Inter_700Bold', color: Colors.warning },
+  severityCard: { marginTop: 14, borderRadius: 14, overflow: 'hidden', backgroundColor: Colors.primary + '15' },
+  severityHead: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.primary, paddingHorizontal: 12, paddingVertical: 8 },
+  severityHeadText: { fontSize: 12, fontFamily: 'Inter_600SemiBold', color: Colors.white },
+  severityValue: { fontSize: 22, fontFamily: 'Inter_700Bold', color: Colors.primary, paddingHorizontal: 12, paddingTop: 10 },
+  severityScore: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.gray600, paddingHorizontal: 12, paddingBottom: 10 },
   doneBtn: { backgroundColor: Colors.primary, height: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   doneBtnText: { fontSize: 16, fontFamily: 'Inter_700Bold', color: Colors.white },
 });

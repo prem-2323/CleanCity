@@ -15,10 +15,17 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.cleanmap"
+      "bundleIdentifier": "com.cleanmap",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "CleanMap needs your location to show nearby waste reports and enable real-time tracking for cleaners."
+      }
     },
     "android": {
       "package": "com.cleanmap",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#1E3A8A",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -37,7 +44,13 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "CleanMap needs your location to show nearby waste reports and track cleanup progress."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

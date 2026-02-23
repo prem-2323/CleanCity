@@ -8,7 +8,8 @@ import {
   addDoc,
   updateDoc,
   doc,
-  writeBatch
+  writeBatch,
+  getDocs
 } from 'firebase/firestore';
 
 export type ReportStatus = 'pending' | 'assigned' | 'in_progress' | 'resolved';
@@ -32,6 +33,16 @@ export interface Report {
   assignedTo?: string;
   aiConfidence: number;
   creditsEarned: number;
+  isWaste?: boolean;
+  severityScore?: number;
+  detectedObjects?: string[];
+  modelTrace?: string[];
+  cleanupVerification?: {
+    verified: boolean;
+    similarityScore: number;
+    cleanupScore: number;
+    checkedAt: string;
+  };
   beforeImage?: string;
   afterImage?: string;
 }
@@ -50,7 +61,7 @@ export interface StaffMember {
 interface ReportsContextValue {
   reports: Report[];
   staff: StaffMember[];
-  addReport: (report: Omit<Report, 'id'>) => Promise<void>;
+  addReport: (report: Omit<Report, 'id'>) => Promise<string | null>;
   updateReport: (id: string, updates: Partial<Report>) => Promise<void>;
   bulkUpdateReports: (ids: string[], updates: Partial<Report>) => Promise<void>;
   getReportsByStatus: (status: ReportStatus) => Report[];
@@ -59,6 +70,14 @@ interface ReportsContextValue {
 }
 
 const ReportsContext = createContext<ReportsContextValue | null>(null);
+
+const SEED_STAFF: Omit<StaffMember, 'id'>[] = [
+  { name: 'Ravi Kumar', rating: 4.8, tasksCompleted: 47, activeTasks: 1, maxTasks: 5, zone: 'North Zone', active: true },
+  { name: 'Priya Sharma', rating: 4.6, tasksCompleted: 38, activeTasks: 0, maxTasks: 5, zone: 'South Zone', active: true },
+  { name: 'Amit Singh', rating: 4.9, tasksCompleted: 62, activeTasks: 2, maxTasks: 5, zone: 'East Zone', active: true },
+  { name: 'Neha Patel', rating: 4.5, tasksCompleted: 29, activeTasks: 0, maxTasks: 4, zone: 'West Zone', active: true },
+  { name: 'Suresh Yadav', rating: 4.3, tasksCompleted: 15, activeTasks: 1, maxTasks: 4, zone: 'Central Zone', active: true },
+];
 
 export function ReportsProvider({ children }: { children: ReactNode }) {
   const [reports, setReports] = useState<Report[]>([]);
@@ -95,6 +114,11 @@ export function ReportsProvider({ children }: { children: ReactNode }) {
         })) as StaffMember[];
         setStaff(staffData);
         setStaffLoaded(true);
+
+        // Seed staff collection if empty
+        if (staffData.length === 0) {
+          seedStaffCollection();
+        }
       },
       (error) => {
         console.error("Firestore Staff Snapshot Error:", error.message);
@@ -108,6 +132,22 @@ export function ReportsProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const seedStaffCollection = async () => {
+    try {
+      const existing = await getDocs(collection(db, 'staff'));
+      if (existing.size > 0) return;
+      const batch = writeBatch(db);
+      SEED_STAFF.forEach((s) => {
+        const ref = doc(collection(db, 'staff'));
+        batch.set(ref, s);
+      });
+      await batch.commit();
+      console.log('Seeded staff collection with', SEED_STAFF.length, 'members');
+    } catch (error) {
+      console.error('Error seeding staff:', error);
+    }
+  };
+
   useEffect(() => {
     if (reportsLoaded && staffLoaded) {
       setIsLoading(false);
@@ -116,12 +156,28 @@ export function ReportsProvider({ children }: { children: ReactNode }) {
 
   const addReport = async (report: Omit<Report, 'id'>) => {
     try {
-      await addDoc(collection(db, 'reports'), {
+      const docRef = await addDoc(collection(db, 'reports'), {
         ...report,
         createdAt: new Date().toISOString()
       });
+
+      // Auto-assign to best available staff based on priority
+      const bestStaff = getBestAvailableStaff();
+      if (bestStaff) {
+        await updateDoc(doc(db, 'reports', docRef.id), {
+          status: 'assigned',
+          assignedTo: bestStaff.id,
+        });
+        // Increment staff active tasks
+        await updateDoc(doc(db, 'staff', bestStaff.id), {
+          activeTasks: bestStaff.activeTasks + 1,
+        });
+      }
+
+      return docRef.id;
     } catch (error) {
       console.error('Error adding report:', error);
+      return null;
     }
   };
 

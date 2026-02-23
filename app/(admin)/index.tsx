@@ -26,7 +26,7 @@ export default function AdminDashboard() {
 
   const activityFeed = useMemo(() => reports.slice(0, 5).map((report) => {
     const statusText = report.status.replace('_', ' ');
-    const icon = report.status === 'resolved'
+    const icon: keyof typeof Ionicons.glyphMap = report.status === 'resolved'
       ? 'checkmark-circle'
       : report.priority === 'critical'
         ? 'alert-circle'
@@ -41,7 +41,7 @@ export default function AdminDashboard() {
       id: report.id,
       text: `${report.title} (${statusText})`,
       time: new Date(report.createdAt).toLocaleString(),
-      icon: icon as const,
+      icon,
       color,
     };
   }), [reports]);

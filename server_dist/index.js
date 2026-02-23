@@ -34,6 +34,68 @@ var userSchema = new mongoose.Schema({
 });
 var User = mongoose.model("User", userSchema);
 
+// server/services/aiModelService.ts
+import { spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
+function getWorkspaceRoot() {
+  return process.cwd();
+}
+function getPythonExecutable() {
+  if (process.env.MODEL_PYTHON_PATH) {
+    return process.env.MODEL_PYTHON_PATH;
+  }
+  const workspaceRoot = getWorkspaceRoot();
+  const venvPython = path.join(workspaceRoot, ".venv-models", "Scripts", "python.exe");
+  if (fs.existsSync(venvPython)) {
+    return venvPython;
+  }
+  return "python";
+}
+function runPythonScript(scriptRelativePath, payload) {
+  return new Promise((resolve2, reject) => {
+    const workspaceRoot = getWorkspaceRoot();
+    const scriptPath = path.join(workspaceRoot, scriptRelativePath);
+    const pythonExe = getPythonExecutable();
+    const child = spawn(pythonExe, [scriptPath], {
+      cwd: workspaceRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      reject(error);
+    });
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr || `Python script failed with code ${code}`));
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stdout);
+        resolve2(parsed);
+      } catch (error) {
+        reject(new Error(`Invalid model response: ${String(error)}`));
+      }
+    });
+    child.stdin.write(JSON.stringify(payload));
+    child.stdin.end();
+  });
+}
+function analyzeWasteWithModels(payload) {
+  return runPythonScript("ai-models/scripts/analyze_image.py", payload);
+}
+function verifyCleanupWithModels(payload) {
+  return runPythonScript("ai-models/scripts/verify_cleanup.py", payload);
+}
+
 // server/routes.ts
 async function registerRoutes(app2) {
   app2.post("/api/register", async (req, res) => {
@@ -70,13 +132,45 @@ async function registerRoutes(app2) {
       res.status(500).json({ message: error.message });
     }
   });
+  app2.post("/api/ai/analyze", async (req, res) => {
+    try {
+      const { imageSource, title, description } = req.body ?? {};
+      if (!imageSource || !title) {
+        return res.status(400).json({ message: "imageSource and title are required" });
+      }
+      const result = await analyzeWasteWithModels({
+        imageSource: String(imageSource),
+        title: String(title),
+        description: description ? String(description) : ""
+      });
+      return res.json(result);
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "AI analyze failed" });
+    }
+  });
+  app2.post("/api/ai/verify-cleanup", async (req, res) => {
+    try {
+      const { beforeImageSource, afterImageSource, severityScore } = req.body ?? {};
+      if (!afterImageSource) {
+        return res.status(400).json({ message: "afterImageSource is required" });
+      }
+      const result = await verifyCleanupWithModels({
+        beforeImageSource: beforeImageSource ? String(beforeImageSource) : void 0,
+        afterImageSource: String(afterImageSource),
+        severityScore: Number(severityScore ?? 60)
+      });
+      return res.json(result);
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "AI verify failed" });
+    }
+  });
   const httpServer = createServer(app2);
   return httpServer;
 }
 
 // server/index.ts
-import * as fs from "fs";
-import * as path from "path";
+import * as fs2 from "fs";
+import * as path2 from "path";
 var app = express();
 var log = console.log;
 function setupCors(app2) {
@@ -120,7 +214,7 @@ function setupBodyParsing(app2) {
 function setupRequestLogging(app2) {
   app2.use((req, res, next) => {
     const start = Date.now();
-    const path2 = req.path;
+    const path3 = req.path;
     let capturedJsonResponse = void 0;
     const originalResJson = res.json;
     res.json = function(bodyJson, ...args) {
@@ -128,9 +222,9 @@ function setupRequestLogging(app2) {
       return originalResJson.apply(res, [bodyJson, ...args]);
     };
     res.on("finish", () => {
-      if (!path2.startsWith("/api")) return;
+      if (!path3.startsWith("/api")) return;
       const duration = Date.now() - start;
-      let logLine = `${req.method} ${path2} ${res.statusCode} in ${duration}ms`;
+      let logLine = `${req.method} ${path3} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
@@ -144,8 +238,8 @@ function setupRequestLogging(app2) {
 }
 function getAppName() {
   try {
-    const appJsonPath = path.resolve(process.cwd(), "app.json");
-    const appJsonContent = fs.readFileSync(appJsonPath, "utf-8");
+    const appJsonPath = path2.resolve(process.cwd(), "app.json");
+    const appJsonContent = fs2.readFileSync(appJsonPath, "utf-8");
     const appJson = JSON.parse(appJsonContent);
     return appJson.expo?.name || "App Landing Page";
   } catch {
@@ -153,19 +247,19 @@ function getAppName() {
   }
 }
 function serveExpoManifest(platform, res) {
-  const manifestPath = path.resolve(
+  const manifestPath = path2.resolve(
     process.cwd(),
     "static-build",
     platform,
     "manifest.json"
   );
-  if (!fs.existsSync(manifestPath)) {
+  if (!fs2.existsSync(manifestPath)) {
     return res.status(404).json({ error: `Manifest not found for platform: ${platform}` });
   }
   res.setHeader("expo-protocol-version", "1");
   res.setHeader("expo-sfv-version", "0");
   res.setHeader("content-type", "application/json");
-  const manifest = fs.readFileSync(manifestPath, "utf-8");
+  const manifest = fs2.readFileSync(manifestPath, "utf-8");
   res.send(manifest);
 }
 function serveLandingPage({
@@ -187,13 +281,13 @@ function serveLandingPage({
   res.status(200).send(html);
 }
 function configureExpoAndLanding(app2) {
-  const templatePath = path.resolve(
+  const templatePath = path2.resolve(
     process.cwd(),
     "server",
     "templates",
     "landing-page.html"
   );
-  const landingPageTemplate = fs.readFileSync(templatePath, "utf-8");
+  const landingPageTemplate = fs2.readFileSync(templatePath, "utf-8");
   const appName = getAppName();
   log("Serving static Expo files with dynamic manifest routing");
   app2.use((req, res, next) => {
@@ -217,8 +311,8 @@ function configureExpoAndLanding(app2) {
     }
     next();
   });
-  app2.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
-  app2.use(express.static(path.resolve(process.cwd(), "static-build")));
+  app2.use("/assets", express.static(path2.resolve(process.cwd(), "assets")));
+  app2.use(express.static(path2.resolve(process.cwd(), "static-build")));
   log("Expo routing: Checking expo-platform header on / and /manifest");
 }
 function setupErrorHandler(app2) {
@@ -238,8 +332,9 @@ function setupErrorHandler(app2) {
     throw new Error("DATABASE_URL is required");
   }
   try {
+    console.log("Connecting to MongoDB...");
     await mongoose2.connect(process.env.DATABASE_URL);
-    log("Connected to MongoDB");
+    console.log("Connected to MongoDB successfully");
   } catch (error) {
     console.error("MongoDB connection error:", error);
     process.exit(1);
