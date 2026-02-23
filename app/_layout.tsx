@@ -27,6 +27,7 @@ function RootLayoutNav() {
       <Stack.Screen name="assign-staff" options={{ animation: 'slide_from_bottom', presentation: 'modal' }} />
       <Stack.Screen name="rewards" options={{ animation: 'slide_from_right' }} />
       <Stack.Screen name="ai-verification" options={{ animation: 'slide_from_right' }} />
+      <Stack.Screen name="cleanup-verification" options={{ animation: 'slide_from_right' }} />
     </Stack>
   );
 }

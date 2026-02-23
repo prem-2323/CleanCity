@@ -15,12 +15,28 @@ from ultralytics import YOLO
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 YOLO_WEIGHTS = os.path.join(ROOT, 'ai-models', 'weights', 'yolov8n.pt')
+TRASH_CLS_WEIGHTS = os.path.join(ROOT, 'ai-models', 'weights', 'yolov8n-trash-cls.pt')
 
 _MOBILENET_WEIGHTS = MobileNet_V2_Weights.DEFAULT
 _MOBILENET = mobilenet_v2(weights=_MOBILENET_WEIGHTS).eval()
 _PREPROCESS = _MOBILENET_WEIGHTS.transforms()
 _LABELS = _MOBILENET_WEIGHTS.meta.get('categories', [])
 _YOLO = YOLO(YOLO_WEIGHTS)
+
+# Trained trash classifier (cardboard, glass, metal, paper, plastic, trash)
+_TRASH_CLS = None
+if os.path.exists(TRASH_CLS_WEIGHTS):
+    _TRASH_CLS = YOLO(TRASH_CLS_WEIGHTS)
+
+# Map trash classifier labels to our waste types
+_TRASH_CLS_TO_TYPE = {
+    'cardboard': 'mixed',
+    'glass': 'hazardous',
+    'metal': 'mixed',
+    'paper': 'mixed',
+    'plastic': 'plastic',
+    'trash': 'mixed',
+}
 
 _WASTE_WORDS = {
     'garbage', 'trash', 'waste', 'dustbin', 'rubbish', 'plastic', 'bottle', 'can', 'dump', 'garbage truck'
@@ -52,7 +68,9 @@ def _load_image(source: str) -> Image.Image:
         return Image.open(io.BytesIO(data)).convert('RGB')
 
     if re.match(r'^https?://', source):
-        response = requests.get(source, timeout=30)
+        response = requests.get(source, timeout=30, headers={
+            'User-Agent': 'CleanCity-AI/1.0',
+        })
         response.raise_for_status()
         return Image.open(io.BytesIO(response.content)).convert('RGB')
 
@@ -108,9 +126,30 @@ def _detect_yolo(image: Image.Image) -> tuple[list[dict[str, Any]], float, float
     return detections, mean_conf, area_ratio
 
 
-def _infer_type(title: str, description: str, detections: list[dict[str, Any]]) -> str:
+def _classify_trash(image: Image.Image) -> tuple[str, float, str]:
+    """Use trained trash classifier to identify waste type.
+    Returns (predicted_class, confidence, mapped_waste_type).
+    """
+    if _TRASH_CLS is None:
+        return '', 0.0, 'mixed'
+
+    result = _TRASH_CLS.predict(image, verbose=False)[0]
+    if result.probs is not None:
+        top_idx = result.probs.top1
+        top_conf = float(result.probs.top1conf)
+        class_name = result.names.get(top_idx, 'unknown')
+        waste_type = _TRASH_CLS_TO_TYPE.get(class_name, 'mixed')
+        return class_name, top_conf, waste_type
+    return '', 0.0, 'mixed'
+
+
+def _infer_type(title: str, description: str, detections: list[dict[str, Any]], trash_cls_type: str = '') -> str:
     text = f'{title} {description}'.lower()
     scores = {'plastic': 0, 'organic': 0, 'hazardous': 0, 'electronic': 0, 'mixed': 0}
+
+    # Give high weight to our trained classifier result
+    if trash_cls_type and trash_cls_type in scores:
+        scores[trash_cls_type] += 5
 
     for item in detections:
         cls = item['class'].lower()
@@ -161,9 +200,13 @@ def main() -> None:
     image = _load_image(str(image_source))
     mobilenet_score, top_labels = _mobilenet_score(image)
 
+    # Run trained trash classifier
+    trash_cls_label, trash_cls_conf, trash_cls_type = _classify_trash(image)
+    trash_cls_is_waste = trash_cls_conf >= 0.40  # trained model says it's waste
+
     text_signal = bool(re.search(r'waste|trash|garbage|dump|dirty|plastic|litter|debris', f'{title} {description}', re.IGNORECASE))
     mobilenet_is_waste = mobilenet_score >= 0.085
-    is_waste = mobilenet_is_waste or text_signal
+    is_waste = mobilenet_is_waste or text_signal or trash_cls_is_waste
 
     if not is_waste:
         confidence = int(max(50, min(95, round((1 - mobilenet_score) * 100))))
@@ -178,6 +221,7 @@ def main() -> None:
             'rewardCredits': 0,
             'modelTrace': [
                 'MobileNetV2: Waste vs Non-Waste',
+                'YOLOv8-Trash-Cls: Not Waste' if _TRASH_CLS else 'YOLOv8-Trash-Cls: Not Loaded',
                 'YOLOv8: Skipped (non-waste)',
                 'Google Maps: Location Attach',
             ],
@@ -186,6 +230,12 @@ def main() -> None:
                     'wasteProbability': round(mobilenet_score, 4),
                     'isWaste': False,
                     'topLabels': top_labels[:5],
+                },
+                'trashClassifier': {
+                    'loaded': _TRASH_CLS is not None,
+                    'predictedClass': trash_cls_label,
+                    'confidence': round(trash_cls_conf, 4),
+                    'mappedType': trash_cls_type,
                 },
                 'yolov8': {
                     'ran': False,
@@ -199,12 +249,18 @@ def main() -> None:
 
     detections, mean_conf, area_ratio = _detect_yolo(image)
 
-    waste_type = _infer_type(title, description, detections)
+    waste_type = _infer_type(title, description, detections, trash_cls_type)
     severity_score, severity_level = _severity_from_signal(waste_type, len(detections), area_ratio, mean_conf)
 
     is_waste = True
-    confidence = int(max(50, min(99, round(max(mobilenet_score * 100, mean_conf * 100, 62)))))
+    # Combine confidences: best of MobileNet, YOLO detections, and trained trash classifier
+    confidence = int(max(50, min(99, round(max(mobilenet_score * 100, mean_conf * 100, trash_cls_conf * 100, 62)))))
     reward_credits = max(10, int(round((severity_score / 4) + (confidence / 8))))
+
+    detected_objects = [item['class'] for item in detections[:6]] or top_labels[:3]
+    # Prepend trained classifier label if available
+    if trash_cls_label and trash_cls_label not in [d.lower() for d in detected_objects]:
+        detected_objects.insert(0, trash_cls_label.capitalize())
 
     result = {
         'isWaste': bool(is_waste),
@@ -213,11 +269,12 @@ def main() -> None:
         'severityScore': severity_score,
         'severityLevel': severity_level,
         'recommendedPriority': severity_level,
-        'detectedObjects': [item['class'] for item in detections[:6]] or top_labels[:3],
+        'detectedObjects': detected_objects[:6],
         'rewardCredits': reward_credits,
         'modelTrace': [
             'MobileNetV2: Waste vs Non-Waste',
-            'YOLOv8: Waste Type & Severity',
+            f'YOLOv8-Trash-Cls: {trash_cls_label} ({round(trash_cls_conf * 100)}%)' if _TRASH_CLS else 'YOLOv8-Trash-Cls: Not Loaded',
+            'YOLOv8: Waste Detection & Severity',
             'Google Maps: Location Attach',
         ],
         'pipeline': {
@@ -225,6 +282,12 @@ def main() -> None:
                 'wasteProbability': round(mobilenet_score, 4),
                 'isWaste': True,
                 'topLabels': top_labels[:5],
+            },
+            'trashClassifier': {
+                'loaded': _TRASH_CLS is not None,
+                'predictedClass': trash_cls_label,
+                'confidence': round(trash_cls_conf, 4),
+                'mappedType': trash_cls_type,
             },
             'yolov8': {
                 'ran': True,

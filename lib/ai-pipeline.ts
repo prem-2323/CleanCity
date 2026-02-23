@@ -118,17 +118,34 @@ export async function analyzeWasteImage(input: WasteAnalysisInput): Promise<Wast
 }
 
 export async function verifyCleanup(input: CleanupVerificationInput): Promise<CleanupVerificationResult> {
+  // This is the client-side fallback used when the backend AI API is unreachable.
+  // It uses deterministic hashing so the same input always gives the same result.
   const seed = `${input.beforeImageUri || 'none'}::${input.afterImageUri}::${input.wasteType}`;
 
-  const similarityScore = Math.round(numberFromSeed(`${seed}-siamese`, 68, 98));
-  const cleanupSignal = numberFromSeed(`${seed}-cleanup`, 0.55, 0.99);
-  const cleanupScore = Math.round((similarityScore * 0.45) + (cleanupSignal * 100 * 0.55));
+  // If same URI is submitted for both before and after — fail immediately
+  if (input.beforeImageUri && input.beforeImageUri === input.afterImageUri) {
+    return {
+      verified: false,
+      similarityScore: 100,
+      cleanupScore: 15,
+      rewardCredits: 0,
+      modelTrace: [
+        'Siamese Network: Same image detected (fallback)',
+        'YOLOv8: Skipped — no cleanup detected (fallback)',
+      ],
+    };
+  }
+
+  const similarityScore = Math.round(numberFromSeed(`${seed}-siamese`, 35, 72));
+  const cleanupSignal = numberFromSeed(`${seed}-cleanup`, 0.72, 0.99);
+  const changeScore = 1 - (similarityScore / 100);
+  const cleanupScore = Math.round((changeScore * 40) + (cleanupSignal * 100 * 0.60));
 
   const thresholdBySeverity: Record<ReportPriority, number> = {
-    low: 65,
-    medium: 70,
-    high: 75,
-    critical: 80,
+    low: 60,
+    medium: 65,
+    high: 70,
+    critical: 75,
   };
 
   const severity = mapSeverityLevel(input.severityScore);
@@ -143,8 +160,8 @@ export async function verifyCleanup(input: CleanupVerificationInput): Promise<Cl
     cleanupScore,
     rewardCredits,
     modelTrace: [
-      'Siamese Network: Before vs After Similarity',
-      'YOLOv8: Residual Waste Estimate',
+      'Siamese Network: Before vs After Similarity (fallback)',
+      'YOLOv8: Residual Waste Estimate (fallback)',
     ],
   };
 }

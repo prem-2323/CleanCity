@@ -33,9 +33,33 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
 
 # typescript
 *.tsbuildinfo
 .vercel
+
+# Python virtual environments
+.venv-models/
+ai-models/scripts/.venv-models/
+__pycache__/
+*.pyc
+*.pyo
+
+# AI model training outputs & large files
+ai-models/runs/
+ai-models/datasets/
+ai-models/weights/*.pt
+server/weights/
+
+# Build outputs
+server_dist/
+
+# Package lock (optional)
+package-lock.json
+
+# OS files
+Thumbs.db
+Desktop.ini
 
 

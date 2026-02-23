@@ -28,6 +28,14 @@ export default function TaskDetailScreen() {
   const [afterImageUri, setAfterImageUri] = useState<string | null>(null);
   const [isCompleting, setIsCompleting] = useState(false);
 
+  const goBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(cleaner)/tasks');
+    }
+  };
+
   useEffect(() => {
     if (!id || typeof id !== 'string') {
       setIsLoading(false);
@@ -74,6 +82,20 @@ export default function TaskDetailScreen() {
   };
 
   const handleTakeAfterPhoto = async () => {
+    if (Platform.OS === 'web') {
+      // On web, camera API is unreliable; use image library (file picker) instead
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.7,
+      });
+      if (!result.canceled) {
+        setAfterImageUri(result.assets[0].uri);
+      }
+      return;
+    }
+
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (permission.status !== 'granted') {
       alert('Camera access is required to verify cleanup.');
@@ -88,7 +110,7 @@ export default function TaskDetailScreen() {
 
     if (!result.canceled) {
       setAfterImageUri(result.assets[0].uri);
-      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
   };
 
@@ -125,21 +147,46 @@ export default function TaskDetailScreen() {
     setIsCompleting(true);
 
     try {
-      const afterImageUrl = await uploadAfterImage(afterImageUri, report.id || Crypto.randomUUID());
+      let afterImageUrl: string;
+      try {
+        afterImageUrl = await uploadAfterImage(afterImageUri, report.id || Crypto.randomUUID());
+      } catch (uploadErr) {
+        console.warn('Image upload failed, using local URI:', uploadErr);
+        // On web, convert blob to data URL inline so the API can still receive it
+        if (Platform.OS === 'web') {
+          const resp = await fetch(afterImageUri);
+          const blob = await resp.blob();
+          afterImageUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error('Failed to read image'));
+            reader.readAsDataURL(blob);
+          });
+        } else {
+          afterImageUrl = afterImageUri;
+        }
+      }
 
-      const verification = await verifyCleanupApi<Awaited<ReturnType<typeof verifyCleanup>>>({
-        beforeImageSource: report.beforeImage,
-        afterImageSource: afterImageUrl,
-        severityScore: report.severityScore || 60,
-      }).catch(() => verifyCleanup({
-        beforeImageUri: report.beforeImage,
-        afterImageUri,
-        wasteType: report.wasteType,
-        severityScore: report.severityScore || 60,
-      }));
+      let verification: Awaited<ReturnType<typeof verifyCleanup>>;
+      try {
+        verification = await verifyCleanupApi<Awaited<ReturnType<typeof verifyCleanup>>>({
+          beforeImageSource: report.beforeImage,
+          afterImageSource: afterImageUrl,
+          severityScore: report.severityScore || 60,
+        });
+      } catch (apiErr) {
+        console.warn('AI API verify failed, using local fallback:', apiErr);
+        verification = await verifyCleanup({
+          beforeImageUri: report.beforeImage,
+          afterImageUri,
+          wasteType: report.wasteType,
+          severityScore: report.severityScore || 60,
+        });
+      }
 
       if (!verification.verified) {
         alert(`Cleanup verification failed (${verification.cleanupScore}%). Please recapture and clean remaining waste.`);
+        setIsCompleting(false);
         return;
       }
 
@@ -170,7 +217,21 @@ export default function TaskDetailScreen() {
       }
 
       await addCredits(verification.rewardCredits);
-      router.back();
+
+      router.push({
+        pathname: '/cleanup-verification',
+        params: {
+          cleanupScore: String(verification.cleanupScore),
+          similarityScore: String(verification.similarityScore ?? 0),
+          rewardCredits: String(verification.rewardCredits),
+          verified: String(verification.verified),
+          residualDetections: '0',
+          taskTitle: report.title || '',
+        },
+      });
+    } catch (err) {
+      console.error('Mark complete error:', err);
+      alert('Something went wrong while completing the task. Please try again.');
     } finally {
       setIsCompleting(false);
     }
@@ -179,7 +240,7 @@ export default function TaskDetailScreen() {
   if (isLoading) {
     return (
       <View style={[styles.container, { paddingTop: (Platform.OS === 'web' ? 67 : insets.top) + 20 }]}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+        <Pressable onPress={goBack} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={Colors.gray800} />
         </Pressable>
         <View style={styles.emptyState}>
@@ -192,7 +253,7 @@ export default function TaskDetailScreen() {
   if (!report) {
     return (
       <View style={[styles.container, { paddingTop: (Platform.OS === 'web' ? 67 : insets.top) + 20 }]}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+        <Pressable onPress={goBack} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={Colors.gray800} />
         </Pressable>
         <View style={styles.emptyState}>
@@ -205,7 +266,7 @@ export default function TaskDetailScreen() {
   return (
     <View style={styles.container}>
       <View style={[styles.topBar, { paddingTop: (Platform.OS === 'web' ? 67 : insets.top) + 8 }]}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+        <Pressable onPress={goBack} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={Colors.gray800} />
         </Pressable>
         <Text style={styles.topTitle}>Task Details</Text>

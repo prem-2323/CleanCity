@@ -17,10 +17,16 @@ from ultralytics import YOLO
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 YOLO_WEIGHTS = os.path.join(ROOT, 'ai-models', 'weights', 'yolov8n.pt')
 SIAMESE_WEIGHTS = os.path.join(ROOT, 'ai-models', 'weights', 'siamese.pt')
+TRASH_CLS_WEIGHTS = os.path.join(ROOT, 'ai-models', 'weights', 'yolov8n-trash-cls.pt')
 
 _MOBILENET_WEIGHTS = MobileNet_V2_Weights.DEFAULT
 _PREPROCESS = _MOBILENET_WEIGHTS.transforms()
 _YOLO = YOLO(YOLO_WEIGHTS)
+
+# Trained trash classifier for detecting waste in after-photos
+_TRASH_CLS = None
+if os.path.exists(TRASH_CLS_WEIGHTS):
+    _TRASH_CLS = YOLO(TRASH_CLS_WEIGHTS)
 
 
 class SiameseNetwork(nn.Module):
@@ -62,7 +68,9 @@ def _load_image(source: str) -> Image.Image:
         return Image.open(io.BytesIO(data)).convert('RGB')
 
     if re.match(r'^https?://', source):
-        response = requests.get(source, timeout=30)
+        response = requests.get(source, timeout=30, headers={
+            'User-Agent': 'CleanCity-AI/1.0',
+        })
         response.raise_for_status()
         return Image.open(io.BytesIO(response.content)).convert('RGB')
 
@@ -84,6 +92,7 @@ def _cosine_similarity(before: Image.Image, after: Image.Image) -> float:
 
 
 def _after_waste_density(after: Image.Image) -> tuple[float, int]:
+    """Detect residual waste using generic YOLO (object detection)."""
     result = _YOLO.predict(after, verbose=False)[0]
     if result.boxes is None or len(result.boxes) == 0:
         return 0.0, 0
@@ -95,6 +104,22 @@ def _after_waste_density(after: Image.Image) -> tuple[float, int]:
         covered_area += max((x2 - x1) * (y2 - y1), 0.0)
 
     return float(min(covered_area / image_area, 1.0)), int(len(result.boxes))
+
+
+def _classify_after_waste(after: Image.Image) -> tuple[str, float]:
+    """Use trained trash classifier to check if after-photo still contains waste.
+    Returns (predicted_class, confidence).
+    """
+    if _TRASH_CLS is None:
+        return '', 0.0
+
+    result = _TRASH_CLS.predict(after, verbose=False)[0]
+    if result.probs is not None:
+        top_idx = result.probs.top1
+        top_conf = float(result.probs.top1conf)
+        class_name = result.names.get(top_idx, 'unknown')
+        return class_name, top_conf
+    return '', 0.0
 
 
 def _severity_threshold(severity_score: int) -> int:
@@ -117,13 +142,52 @@ def main() -> None:
         raise ValueError('afterImageSource is required')
 
     after_image = _load_image(str(after_source))
-    before_image = _load_image(str(before_source)) if before_source else after_image
 
-    similarity = _cosine_similarity(before_image, after_image)
+    # Try to load before image
+    before_image = None
+    before_available = False
+    if before_source:
+        try:
+            before_image = _load_image(str(before_source))
+            before_available = True
+        except Exception as exc:
+            sys.stderr.write(f'Warning: could not load beforeImage ({exc})\n')
+
     waste_density, waste_boxes = _after_waste_density(after_image)
 
-    similarity_score = int(round(similarity * 100))
-    cleanliness_score = int(round((similarity * 45) + ((1 - waste_density) * 55)))
+    # Use trained trash classifier to check for residual waste
+    trash_cls_label, trash_cls_conf = _classify_after_waste(after_image)
+    # If classifier is highly confident it's still waste, penalize cleanliness
+    trash_penalty = 0.0
+    if _TRASH_CLS is not None and trash_cls_conf >= 0.60:
+        # The classifier sees waste in the after-photo
+        trash_penalty = trash_cls_conf * 0.35
+        sys.stderr.write(f'Trash classifier: {trash_cls_label} ({trash_cls_conf:.2f}) -> penalty {trash_penalty:.2f}\n')
+
+    cleanliness = max(0.0, (1.0 - waste_density) - trash_penalty)  # higher = cleaner after image
+
+    if before_available:
+        similarity = _cosine_similarity(before_image, after_image)
+        similarity_score = int(round(similarity * 100))
+
+        if similarity > 0.95:
+            # Nearly identical images — no real cleanup performed
+            sys.stderr.write(f'Same-image detected (similarity={similarity:.4f})\n')
+            cleanliness_score = min(30, int(round(cleanliness * 30)))
+        elif similarity > 0.90:
+            # Suspiciously similar — heavy penalty
+            change_score = 1.0 - similarity
+            cleanliness_score = int(round((change_score * 40) + (cleanliness * 40)))
+        else:
+            # Normal range — scene changed, check cleanliness
+            change_score = 1.0 - similarity
+            cleanliness_score = int(round((change_score * 25) + (cleanliness * 75)))
+    else:
+        # Before image unavailable — rely on waste detection only (max 70)
+        similarity = 0.0
+        similarity_score = 0
+        cleanliness_score = int(round(cleanliness * 70))
+
     threshold = _severity_threshold(severity_score)
     verified = cleanliness_score >= threshold
 
@@ -137,6 +201,7 @@ def main() -> None:
         'residualDetections': waste_boxes,
         'modelTrace': [
             'Siamese Network: Before vs After Similarity',
+            f'YOLOv8-Trash-Cls: {trash_cls_label} ({round(trash_cls_conf * 100)}%)' if _TRASH_CLS else 'YOLOv8-Trash-Cls: Not Loaded',
             'YOLOv8: Residual Waste Estimate',
         ],
         'pipeline': {
@@ -144,6 +209,12 @@ def main() -> None:
                 'model': 'SiameseNetwork(MobileNetV2 backbone)',
                 'checkpointLoaded': os.path.exists(SIAMESE_WEIGHTS),
                 'similarity': round(similarity, 4),
+            },
+            'trashClassifier': {
+                'loaded': _TRASH_CLS is not None,
+                'predictedClass': trash_cls_label,
+                'confidence': round(trash_cls_conf, 4),
+                'penalty': round(trash_penalty, 4),
             },
             'yolov8': {
                 'residualWasteDetections': waste_boxes,
