@@ -124,12 +124,12 @@ def _classify_after_waste(after: Image.Image) -> tuple[str, float]:
 
 def _severity_threshold(severity_score: int) -> int:
     if severity_score >= 85:
-        return 80
-    if severity_score >= 65:
         return 75
-    if severity_score >= 40:
+    if severity_score >= 65:
         return 70
-    return 65
+    if severity_score >= 40:
+        return 65
+    return 60
 
 
 def main() -> None:
@@ -157,11 +157,14 @@ def main() -> None:
 
     # Use trained trash classifier to check for residual waste
     trash_cls_label, trash_cls_conf = _classify_after_waste(after_image)
-    # If classifier is highly confident it's still waste, penalize cleanliness
+    # If classifier is VERY confident it's still waste, penalize cleanliness.
+    # NOTE: The trash classifier has NO "clean" class (only cardboard/glass/metal/
+    # paper/plastic/trash), so it always picks a waste label even on clean images.
+    # We use a high threshold (0.80) to avoid penalizing genuinely clean scenes.
     trash_penalty = 0.0
-    if _TRASH_CLS is not None and trash_cls_conf >= 0.60:
-        # The classifier sees waste in the after-photo
-        trash_penalty = trash_cls_conf * 0.35
+    if _TRASH_CLS is not None and trash_cls_conf >= 0.80:
+        # The classifier is very confident waste remains in the after-photo
+        trash_penalty = trash_cls_conf * 0.20
         sys.stderr.write(f'Trash classifier: {trash_cls_label} ({trash_cls_conf:.2f}) -> penalty {trash_penalty:.2f}\n')
 
     cleanliness = max(0.0, (1.0 - waste_density) - trash_penalty)  # higher = cleaner after image
@@ -181,7 +184,7 @@ def main() -> None:
         else:
             # Normal range — scene changed, check cleanliness
             change_score = 1.0 - similarity
-            cleanliness_score = int(round((change_score * 25) + (cleanliness * 75)))
+            cleanliness_score = int(round((change_score * 35) + (cleanliness * 65)))
     else:
         # Before image unavailable — rely on waste detection only (max 70)
         similarity = 0.0

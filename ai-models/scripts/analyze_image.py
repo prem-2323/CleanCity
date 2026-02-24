@@ -152,14 +152,17 @@ def _classify_trash(image: Image.Image) -> tuple[str, float, str]:
     return '', 0.0, 'mixed'
 
 
-def _infer_type(title: str, description: str, detections: list[dict[str, Any]], trash_cls_type: str = '') -> str:
+def _infer_type(title: str, description: str, detections: list[dict[str, Any]],
+                trash_cls_type: str = '', trash_cls_conf: float = 0.0) -> str:
     text = f'{title} {description}'.lower()
-    scores = {'plastic': 0, 'organic': 0, 'hazardous': 0, 'electronic': 0, 'mixed': 0}
+    scores: dict[str, float] = {'plastic': 0, 'organic': 0, 'hazardous': 0, 'electronic': 0, 'mixed': 0}
 
-    # Give high weight to our trained classifier result — it is specifically
-    # trained on waste categories and should be the primary signal.
-    if trash_cls_type and trash_cls_type in scores:
-        scores[trash_cls_type] += 10
+    # Give weight to our trained classifier result, scaled by its confidence.
+    # High confidence (≥0.6) → up to 10 points; low confidence (0.3) → ~3 points.
+    # This prevents a low-confidence guess from drowning text/detection signals.
+    if trash_cls_type and trash_cls_type in scores and trash_cls_conf > 0:
+        cls_weight = min(10, max(1, round(trash_cls_conf * 15)))
+        scores[trash_cls_type] += cls_weight
 
     # YOLO COCO detections: only count objects that map to a known waste type.
     # Unmatched detections (person, car, bench, …) are general scene objects
@@ -168,19 +171,19 @@ def _infer_type(title: str, description: str, detections: list[dict[str, Any]], 
         cls = item['class'].lower()
         for waste_type, keywords in _TYPE_KEYWORDS.items():
             if cls in keywords:
-                scores[waste_type] += 2
+                scores[waste_type] += 3
 
     # Match COCO-style keywords in title/description
     for waste_type, keywords in _TYPE_KEYWORDS.items():
         for keyword in keywords:
             if keyword in text:
-                scores[waste_type] += 1
+                scores[waste_type] += 2
 
-    # Match waste-specific text keywords in title/description
+    # Match waste-specific text keywords in title/description (strongest text signal)
     for waste_type, keywords in _TEXT_WASTE_KEYWORDS.items():
         for keyword in keywords:
             if keyword in text:
-                scores[waste_type] += 3
+                scores[waste_type] += 5
 
     return max(scores, key=scores.get)
 
@@ -276,7 +279,7 @@ def main() -> None:
 
     detections, mean_conf, area_ratio = _detect_yolo(image)
 
-    waste_type = _infer_type(title, description, detections, trash_cls_type)
+    waste_type = _infer_type(title, description, detections, trash_cls_type, trash_cls_conf)
     severity_score, severity_level = _severity_from_nearby(nearby_report_count, waste_type)
 
     is_waste = True

@@ -26,7 +26,9 @@ function resolveApiBaseUrl(): string {
     if (domain.startsWith('http://') || domain.startsWith('https://')) {
       return domain;
     }
-    return `https://${domain}`;
+    // Use http for localhost/127.0.0.1 (local dev), https for everything else
+    const isLocal = domain.startsWith('localhost') || domain.startsWith('127.0.0.1');
+    return `${isLocal ? 'http' : 'https'}://${domain}`;
   }
 
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin) {

@@ -42,11 +42,11 @@ const WASTE_KEYWORDS: Record<WasteType, string[]> = {
 };
 
 const DETECTED_OBJECT_SETS: Record<WasteType, string[]> = {
-  plastic: ['Bottle', 'Plastic Bag', 'Packaging'],
-  organic: ['Leaves', 'Food Waste', 'Soil Debris'],
-  hazardous: ['Chemical Container', 'Battery', 'Sharp Object'],
-  electronic: ['Cable', 'Circuit Board', 'Charger'],
-  mixed: ['Mixed Debris', 'Paper', 'Plastic', 'Organic'],
+  plastic: ['Plastic Material'],
+  organic: ['Organic Debris'],
+  hazardous: ['Hazardous Material'],
+  electronic: ['Electronic Waste'],
+  mixed: ['Mixed Waste'],
 };
 
 function getSeedValue(seed: string): number {
@@ -72,8 +72,8 @@ function pickWasteType(seed: string, text: string): WasteType {
     return matched;
   }
 
-  const types: WasteType[] = ['plastic', 'organic', 'hazardous', 'electronic', 'mixed'];
-  return types[Math.floor(numberFromSeed(seed, 0, types.length)) % types.length];
+  // Default to 'mixed' when no keywords match — avoid randomly guessing a specific type
+  return 'mixed';
 }
 
 function mapSeverityLevel(score: number): ReportPriority {

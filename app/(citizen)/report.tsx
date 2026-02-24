@@ -225,11 +225,29 @@ export default function ReportWasteScreen() {
         loc = await fetchCurrentLocation() || null;
       }
 
-      // Use AI to analyze
-      const analysis = await analyzeWasteImage({
+      // Convert local image URI to base64 data URL so the server can read it
+      let imageSource = uri;
+      try {
+        const resp = await fetch(uri);
+        const blob = await resp.blob();
+        imageSource = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('Failed to read image'));
+          reader.readAsDataURL(blob);
+        });
+      } catch {
+        // If conversion fails, keep original URI — fallback will handle it
+      }
+
+      // Use AI to analyze — try server API first (real models), fall back to client-side
+      const analysis = await analyzeWasteApi<Awaited<ReturnType<typeof analyzeWasteImage>>>({
+        imageSource,
+        title: 'Initial Scan',
+      }).catch(() => analyzeWasteImage({
         imageUri: uri,
         title: 'Initial Scan',
-      });
+      }));
 
       setSelectedType(analysis.wasteType);
 
