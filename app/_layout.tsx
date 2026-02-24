@@ -1,10 +1,12 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from "@expo-google-fonts/inter";
+import { Ionicons } from "@expo/vector-icons";
+import * as Font from "expo-font";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { queryClient } from "@/lib/query-client";
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -33,13 +35,34 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold });
+  const [fontsLoaded, fontError] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold });
+  const [iconFontsLoaded, setIconFontsLoaded] = useState(false);
 
   useEffect(() => {
-    if (fontsLoaded) SplashScreen.hideAsync();
-  }, [fontsLoaded]);
+    async function loadIconFonts() {
+      try {
+        await Font.loadAsync({
+          ...Ionicons.font,
+        });
+      } catch (e) {
+        console.warn("Icon fonts failed to load, continuing anyway:", e);
+      } finally {
+        setIconFontsLoaded(true);
+      }
+    }
+    loadIconFonts();
+  }, []);
 
-  if (!fontsLoaded) return null;
+  useEffect(() => {
+    if (fontsLoaded || fontError) {
+      if (iconFontsLoaded) {
+        SplashScreen.hideAsync();
+      }
+    }
+  }, [fontsLoaded, fontError, iconFontsLoaded]);
+
+  if (!fontsLoaded && !fontError) return null;
+  if (!iconFontsLoaded) return null;
 
   return (
     <ErrorBoundary>

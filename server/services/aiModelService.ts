@@ -73,6 +73,9 @@ export interface AnalyzeWastePayload {
   imageSource: string;
   title: string;
   description?: string;
+  latitude?: number;
+  longitude?: number;
+  nearbyReportCount?: number;
 }
 
 export interface AnalyzeWasteResponse {

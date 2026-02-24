@@ -43,7 +43,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/ai/analyze', async (req, res) => {
     try {
-      const { imageSource, title, description } = req.body ?? {};
+      const { imageSource, title, description, latitude, longitude, nearbyReportCount } = req.body ?? {};
 
       if (!imageSource || !title) {
         return res.status(400).json({ message: 'imageSource and title are required' });
@@ -53,6 +53,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         imageSource: String(imageSource),
         title: String(title),
         description: description ? String(description) : '',
+        latitude: latitude != null ? Number(latitude) : undefined,
+        longitude: longitude != null ? Number(longitude) : undefined,
+        nearbyReportCount: nearbyReportCount != null ? Number(nearbyReportCount) : 1,
       });
 
       return res.json(result);

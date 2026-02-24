@@ -1,4 +1,7 @@
 {
+    "storage": {
+        "rules": "storage.rules"
+    },
     "hosting": {
         "site": "cleancity-23",
         "public": "dist",

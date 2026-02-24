@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect, useMemo, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
@@ -31,16 +31,99 @@ export interface ReportMapViewProps {
 }
 
 /**
- * Builds an embeddable OpenStreetMap iframe URL for a given lat/lng.
- * Works reliably on web without CORS or API-key issues.
+ * Build self-contained Leaflet HTML that renders all markers + user location.
+ * Runs inside an iframe via srcdoc so no external CORS issues.
  */
-function buildOsmEmbedUrl(lat: number, lng: number, zoom = 16): string {
-  const bbox = 0.005; // roughly covers ~500m at mid-latitudes
-  return (
-    `https://www.openstreetmap.org/export/embed.html?` +
-    `bbox=${lng - bbox},${lat - bbox},${lng + bbox},${lat + bbox}` +
-    `&layer=mapnik&marker=${lat},${lng}`
-  );
+function buildLeafletHtml(
+  markers: MapMarker[],
+  userLocation?: { latitude: number; longitude: number } | null,
+): string {
+  // Compute center & zoom from markers + user location
+  const points = [
+    ...markers.map((m) => [m.latitude, m.longitude]),
+    ...(userLocation ? [[userLocation.latitude, userLocation.longitude]] : []),
+  ];
+
+  let centerLat = 13.0827;
+  let centerLng = 80.2707;
+  let defaultZoom = 13;
+
+  if (points.length === 1) {
+    centerLat = points[0][0];
+    centerLng = points[0][1];
+    defaultZoom = 15;
+  } else if (points.length > 1) {
+    const lats = points.map((p) => p[0]);
+    const lngs = points.map((p) => p[1]);
+    centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+    centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
+  }
+
+  const markersJs = markers
+    .map(
+      (m) =>
+        `L.circleMarker([${m.latitude}, ${m.longitude}], {
+          radius: 10,
+          fillColor: '${m.color}',
+          color: '#fff',
+          weight: 2,
+          opacity: 1,
+          fillOpacity: 0.85
+        }).addTo(map).bindPopup(\`<b>${m.title.replace(/'/g, "\\'").replace(/`/g, "\\`")}</b>${m.description ? `<br/><span style="color:#666;font-size:12px">${m.description.replace(/'/g, "\\'").replace(/`/g, "\\`")}</span>` : ''}\`).on('click', function(){ window.parent.postMessage({type:'marker-click',id:'${m.id}'},'*'); });`,
+    )
+    .join('\n');
+
+  const userJs = userLocation
+    ? `L.circleMarker([${userLocation.latitude}, ${userLocation.longitude}], {
+        radius: 8,
+        fillColor: '${Colors.secondary}',
+        color: '#fff',
+        weight: 3,
+        opacity: 1,
+        fillOpacity: 0.9
+      }).addTo(map).bindPopup('<b>Your Location</b>');
+      L.circle([${userLocation.latitude}, ${userLocation.longitude}], {
+        radius: 300,
+        color: '${Colors.secondary}',
+        fillColor: '${Colors.secondary}',
+        fillOpacity: 0.08,
+        weight: 1
+      }).addTo(map);`
+    : '';
+
+  // Fit bounds to all points
+  const fitBoundsJs =
+    points.length > 1
+      ? `map.fitBounds([${points.map((p) => `[${p[0]},${p[1]}]`).join(',')}], {padding:[40,40]});`
+      : '';
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; }
+    .leaflet-control-attribution { font-size: 10px !important; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var map = L.map('map').setView([${centerLat}, ${centerLng}], ${defaultZoom});
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19
+    }).addTo(map);
+    ${markersJs}
+    ${userJs}
+    ${fitBoundsJs}
+  <\/script>
+</body>
+</html>`;
 }
 
 export default function ReportMapView({
@@ -49,64 +132,75 @@ export default function ReportMapView({
   onMarkerPress,
   onMapPress,
 }: ReportMapViewProps) {
-  const primaryPoint = markers[0] ?? (userLocation
-    ? {
-        id: 'user-location',
-        latitude: userLocation.latitude,
-        longitude: userLocation.longitude,
-        title: 'Current Location',
-        color: Colors.primary,
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const htmlContent = useMemo(
+    () => buildLeafletHtml(markers, userLocation),
+    [markers, userLocation],
+  );
+
+  // Listen for marker click messages from the iframe
+  const onMarkerPressRef = useRef(onMarkerPress);
+  onMarkerPressRef.current = onMarkerPress;
+
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.data?.type === 'marker-click' && event.data?.id) {
+        const marker = markers.find((m) => m.id === event.data.id);
+        if (marker && onMarkerPressRef.current) {
+          onMarkerPressRef.current(marker);
+        }
       }
-    : null);
+    }
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [markers]);
 
-  const centerLat = primaryPoint?.latitude ?? 0;
-  const centerLng = primaryPoint?.longitude ?? 0;
+  const hasContent = markers.length > 0 || userLocation;
 
-  const mapEmbedUrl = primaryPoint
-    ? buildOsmEmbedUrl(centerLat, centerLng)
-    : null;
-
-  const openStreetMapUrl = primaryPoint
-    ? `https://www.openstreetmap.org/?mlat=${centerLat}&mlon=${centerLng}#map=16/${centerLat}/${centerLng}`
-    : null;
+  const centerLat = markers[0]?.latitude ?? userLocation?.latitude ?? 0;
+  const centerLng = markers[0]?.longitude ?? userLocation?.longitude ?? 0;
+  const openStreetMapUrl =
+    centerLat !== 0
+      ? `https://www.openstreetmap.org/?mlat=${centerLat}&mlon=${centerLng}#map=16/${centerLat}/${centerLng}`
+      : null;
 
   return (
     <View style={styles.container}>
-      {mapEmbedUrl ? (
+      {hasContent ? (
         <View style={styles.mapWrapper}>
-          {/* Use an iframe for an interactive embedded OSM map on web */}
           <iframe
+            ref={iframeRef}
             title="Map View"
-            src={mapEmbedUrl}
+            srcDoc={htmlContent}
             style={{ width: '100%', height: '100%', border: 'none', borderRadius: 16 }}
+            sandbox="allow-scripts"
           />
 
           {/* Floating coordinate badge */}
           <View style={styles.floatingInfo}>
             <Ionicons name="location" size={12} color={Colors.primary} />
             <Text style={styles.coordsText}>
-              {centerLat.toFixed(4)}, {centerLng.toFixed(4)}
+              {markers.length} report{markers.length !== 1 ? 's' : ''} on map
             </Text>
           </View>
 
           {/* Open in OSM link */}
-          <Pressable
-            style={styles.openMapBtn}
-            onPress={() => {
-              if (openStreetMapUrl) Linking.openURL(openStreetMapUrl);
-            }}
-          >
-            <Ionicons name="open-outline" size={14} color={Colors.primary} />
-            <Text style={styles.openMapText}>Open in Maps</Text>
-          </Pressable>
+          {openStreetMapUrl && (
+            <Pressable
+              style={styles.openMapBtn}
+              onPress={() => Linking.openURL(openStreetMapUrl)}
+            >
+              <Ionicons name="open-outline" size={14} color={Colors.primary} />
+              <Text style={styles.openMapText}>Open in Maps</Text>
+            </Pressable>
+          )}
         </View>
       ) : (
         <View style={styles.webFallback}>
           <Ionicons name="map" size={40} color={Colors.primary} />
           <Text style={styles.webFallbackTitle}>Map View</Text>
-          <Text style={styles.webFallbackText}>
-            {markers.length} location{markers.length !== 1 ? 's' : ''} pinned
-          </Text>
+          <Text style={styles.webFallbackText}>No reports to show yet</Text>
           {userLocation && (
             <Text style={styles.webFallbackCoords}>
               Your location: {userLocation.latitude.toFixed(4)}, {userLocation.longitude.toFixed(4)}
@@ -161,7 +255,7 @@ const styles = StyleSheet.create({
   },
   mapWrapper: {
     flex: 1,
-    minHeight: 250,
+    minHeight: 350,
     position: 'relative' as const,
   },
   floatingInfo: {

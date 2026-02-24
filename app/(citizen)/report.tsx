@@ -11,6 +11,18 @@ import * as Location from 'expo-location';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/lib/firebase';
 import { useReports, WasteType, Report } from '@/contexts/ReportsContext';
+
+/** Haversine distance in meters between two lat/lng points */
+function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 import { useAuth } from '@/contexts/AuthContext';
 import { analyzeWasteImage } from '@/lib/ai-pipeline';
 import { analyzeWasteApi } from '@/lib/ai-api';
@@ -28,7 +40,7 @@ const WASTE_TYPES: { type: WasteType; icon: keyof typeof Ionicons.glyphMap; labe
 
 export default function ReportWasteScreen() {
   const insets = useSafeAreaInsets();
-  const { addReport } = useReports();
+  const { addReport, reports } = useReports();
   const { addCredits, uid, userEmail, userName } = useAuth();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -309,8 +321,16 @@ export default function ReportWasteScreen() {
       return dataUrl;
     }
 
-    const response = await fetch(uri);
-    const blob = await response.blob();
+    // React Native: use XMLHttpRequest to create a proper blob from local file URI
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.onload = () => resolve(xhr.response as Blob);
+      xhr.onerror = () => reject(new Error('Failed to read image file'));
+      xhr.responseType = 'blob';
+      xhr.open('GET', uri, true);
+      xhr.send(null);
+    });
+
     const storageRef = ref(storage, `reports/${reportId}.jpg`);
     await uploadBytes(storageRef, blob);
     return await getDownloadURL(storageRef);
@@ -330,22 +350,6 @@ export default function ReportWasteScreen() {
       const reportId = Crypto.randomUUID();
       const imageUrl = await uploadImage(imageUri, reportId);
 
-      const analysis = await analyzeWasteApi<Awaited<ReturnType<typeof analyzeWasteImage>>>({
-        imageSource: imageUrl,
-        title: title.trim(),
-        description: description.trim(),
-      }).catch(() => analyzeWasteImage({
-        imageUri,
-        title: title.trim(),
-        description: description.trim(),
-      }));
-
-      if (!analysis.isWaste) {
-        alert('AI check marked this as non-waste. Please capture a clearer image of civic waste.');
-        setIsSubmitting(false);
-        return;
-      }
-
       let latitude = locationCoords?.latitude ?? 28.6139 + Math.random() * 0.01;
       let longitude = locationCoords?.longitude ?? 77.2090 + Math.random() * 0.01;
 
@@ -356,6 +360,30 @@ export default function ReportWasteScreen() {
           latitude = position.coords.latitude;
           longitude = position.coords.longitude;
         }
+      }
+
+      // Count existing reports within 500m radius for proximity-based severity
+      const nearbyReportCount = reports.filter(r =>
+        haversineMeters(latitude, longitude, r.latitude, r.longitude) <= 500
+      ).length + 1; // +1 to include this new report
+
+      const analysis = await analyzeWasteApi<Awaited<ReturnType<typeof analyzeWasteImage>>>({
+        imageSource: imageUrl,
+        title: title.trim(),
+        description: description.trim(),
+        latitude,
+        longitude,
+        nearbyReportCount,
+      }).catch(() => analyzeWasteImage({
+        imageUri,
+        title: title.trim(),
+        description: description.trim(),
+      }));
+
+      if (!analysis.isWaste) {
+        alert('AI check marked this as non-waste. Please capture a clearer image of civic waste.');
+        setIsSubmitting(false);
+        return;
       }
 
       const credits = analysis.rewardCredits;

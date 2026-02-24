@@ -12,6 +12,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect,
+  signInWithCredential,
   getRedirectResult
 } from 'firebase/auth';
 import {
@@ -21,6 +22,13 @@ import {
   updateDoc,
   increment
 } from 'firebase/firestore';
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
+
+// Required for Expo Go auth session to complete properly
+if (Platform.OS !== 'web') {
+  WebBrowser.maybeCompleteAuthSession();
+}
 
 export type UserRole = 'citizen' | 'cleaner' | 'admin';
 
@@ -57,6 +65,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading: true,
     uid: null,
   });
+
+  // Google Auth for native (Expo Go) — uses expo-auth-session with generic OAuth
+  const [pendingGoogleRole, setPendingGoogleRole] = useState<UserRole | null>(null);
+
+  const googleDiscovery = {
+    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  };
+
+  const redirectUri = AuthSession.makeRedirectUri();
+
+  const [googleRequest, googleResponse, promptGoogleAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID!,
+      redirectUri,
+      responseType: AuthSession.ResponseType.IdToken,
+      scopes: ['openid', 'profile', 'email'],
+      usePKCE: false,
+    },
+    googleDiscovery
+  );
+
+  // Handle Google auth response (native only)
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (googleResponse?.type === 'success') {
+      const idToken = googleResponse.params.id_token;
+      if (!idToken) {
+        console.error('No id_token in Google response');
+        setPendingGoogleRole(null);
+        return;
+      }
+      const credential = GoogleAuthProvider.credential(idToken);
+      signInWithCredential(auth, credential)
+        .then(async (result) => {
+          const firebaseUser = result.user;
+          const role = pendingGoogleRole || 'citizen';
+          const userRef = doc(db, 'users', firebaseUser.uid);
+          const userDoc = await getDoc(userRef);
+
+          if (!userDoc.exists()) {
+            await setDoc(userRef, {
+              name: firebaseUser.displayName || 'Google User',
+              role,
+              email: firebaseUser.email || '',
+              credits: 150,
+              createdAt: new Date().toISOString(),
+            });
+          }
+          setPendingGoogleRole(null);
+        })
+        .catch((error) => {
+          console.error('Google credential sign-in error:', error);
+          setPendingGoogleRole(null);
+        });
+    }
+  }, [googleResponse]);
 
   useEffect(() => {
     // Check if we just returned from a Google redirect (web only)
@@ -249,9 +314,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithGoogle = async (role: UserRole) => {
     try {
-      const provider = new GoogleAuthProvider();
-
       if (Platform.OS === 'web') {
+        // Web: use Firebase popup/redirect
+        const provider = new GoogleAuthProvider();
         try {
           const result = await signInWithPopup(auth, provider);
           const firebaseUser = result.user;
@@ -275,11 +340,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (code && code !== 'auth/popup-blocked' && code !== 'auth/popup-closed-by-user' && code !== 'auth/cancelled-popup-request') {
             throw popupError;
           }
+          // Fallback to redirect if popup blocked
+          await AsyncStorage.setItem(PENDING_GOOGLE_ROLE_KEY, role);
+          await signInWithRedirect(auth, provider);
         }
+      } else {
+        // Native (Expo Go): use expo-auth-session
+        if (!promptGoogleAsync) {
+          throw new Error('Google Sign-In is not configured. Please set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID in your .env file.');
+        }
+        setPendingGoogleRole(role);
+        const result = await promptGoogleAsync();
+        if (result?.type !== 'success') {
+          setPendingGoogleRole(null);
+          if (result?.type === 'dismiss' || result?.type === 'cancel') {
+            // User cancelled — don't show an error
+            return;
+          }
+          throw new Error('Google Sign-In was cancelled or failed.');
+        }
+        // The actual Firebase sign-in is handled by the useEffect above
+        // watching googleResponse
       }
-
-      await AsyncStorage.setItem(PENDING_GOOGLE_ROLE_KEY, role);
-      await signInWithRedirect(auth, provider);
     } catch (error) {
       console.error('Google login error:', error);
       throw error;

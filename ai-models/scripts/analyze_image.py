@@ -53,6 +53,15 @@ _TYPE_KEYWORDS = {
     'organic': {'banana', 'apple', 'orange', 'broccoli', 'carrot', 'sandwich'},
 }
 
+# Text-based keywords for inferring waste type from title/description
+_TEXT_WASTE_KEYWORDS = {
+    'plastic': {'plastic', 'polythene', 'styrofoam', 'wrapper', 'packaging', 'nylon', 'cellophane', 'pet bottle'},
+    'organic': {'organic', 'food', 'leaf', 'leaves', 'compost', 'vegetable', 'fruit', 'rotten', 'biodegradable', 'garden'},
+    'hazardous': {'hazardous', 'hazard', 'battery', 'chemical', 'medical', 'glass', 'sharp', 'toxic', 'dangerous', 'syringe', 'needle'},
+    'electronic': {'electronic', 'e-waste', 'ewaste', 'wire', 'device', 'circuit', 'charger', 'phone', 'cable', 'computer', 'appliance'},
+    'mixed': {'mixed', 'general', 'household', 'junk', 'rubbish', 'clutter'},
+}
+
 
 def _read_json_stdin() -> dict[str, Any]:
     raw = sys.stdin.read().strip()
@@ -147,45 +156,61 @@ def _infer_type(title: str, description: str, detections: list[dict[str, Any]], 
     text = f'{title} {description}'.lower()
     scores = {'plastic': 0, 'organic': 0, 'hazardous': 0, 'electronic': 0, 'mixed': 0}
 
-    # Give high weight to our trained classifier result
+    # Give high weight to our trained classifier result — it is specifically
+    # trained on waste categories and should be the primary signal.
     if trash_cls_type and trash_cls_type in scores:
-        scores[trash_cls_type] += 5
+        scores[trash_cls_type] += 10
 
+    # YOLO COCO detections: only count objects that map to a known waste type.
+    # Unmatched detections (person, car, bench, …) are general scene objects
+    # and should NOT inflate any waste type score.
     for item in detections:
         cls = item['class'].lower()
-        matched = False
         for waste_type, keywords in _TYPE_KEYWORDS.items():
             if cls in keywords:
                 scores[waste_type] += 2
-                matched = True
-        if not matched:
-            scores['mixed'] += 1
 
+    # Match COCO-style keywords in title/description
     for waste_type, keywords in _TYPE_KEYWORDS.items():
         for keyword in keywords:
             if keyword in text:
                 scores[waste_type] += 1
 
+    # Match waste-specific text keywords in title/description
+    for waste_type, keywords in _TEXT_WASTE_KEYWORDS.items():
+        for keyword in keywords:
+            if keyword in text:
+                scores[waste_type] += 3
+
     return max(scores, key=scores.get)
 
 
-def _severity_from_signal(waste_type: str, count: int, area_ratio: float, mean_conf: float) -> tuple[int, str]:
-    base = 25 + (count * 8) + int(area_ratio * 45) + int(mean_conf * 20)
-    if waste_type == 'hazardous':
-        base += 20
-    elif waste_type == 'electronic':
-        base += 8
+def _severity_from_nearby(nearby_count: int, waste_type: str) -> tuple[int, str]:
+    """Determine severity based on how many reports exist within 500m radius.
 
-    score = max(5, min(base, 100))
-    if score >= 85:
-        level = 'critical'
-    elif score >= 65:
-        level = 'high'
-    elif score >= 40:
-        level = 'medium'
+    nearby_count includes the current report being submitted.
+    - 1 (only this report)   → low
+    - 2                      → medium
+    - 3-4                    → high
+    - 5+                     → critical
+
+    Hazardous / electronic waste bumps up one level.
+    """
+    if nearby_count >= 5:
+        base_score, level = 90, 'critical'
+    elif nearby_count >= 3:
+        base_score, level = 70, 'high'
+    elif nearby_count >= 2:
+        base_score, level = 50, 'medium'
     else:
-        level = 'low'
-    return score, level
+        base_score, level = 25, 'low'
+
+    # Hazardous or electronic waste bumps severity up one tier
+    if waste_type in ('hazardous', 'electronic') and level != 'critical':
+        bumps = {'low': ('medium', 50), 'medium': ('high', 70), 'high': ('critical', 90)}
+        level, base_score = bumps[level]
+
+    return base_score, level
 
 
 def main() -> None:
@@ -193,6 +218,7 @@ def main() -> None:
     image_source = payload.get('imageSource')
     title = str(payload.get('title', ''))
     description = str(payload.get('description', ''))
+    nearby_report_count = int(payload.get('nearbyReportCount', 1))
 
     if not image_source:
         raise ValueError('imageSource is required')
@@ -219,11 +245,12 @@ def main() -> None:
             'recommendedPriority': 'low',
             'detectedObjects': top_labels[:3],
             'rewardCredits': 0,
+            'nearbyReportCount': nearby_report_count,
             'modelTrace': [
                 'MobileNetV2: Waste vs Non-Waste',
                 'YOLOv8-Trash-Cls: Not Waste' if _TRASH_CLS else 'YOLOv8-Trash-Cls: Not Loaded',
                 'YOLOv8: Skipped (non-waste)',
-                'Google Maps: Location Attach',
+                f'Proximity: {nearby_report_count} report(s) within 500m',
             ],
             'pipeline': {
                 'mobilenet': {
@@ -250,7 +277,7 @@ def main() -> None:
     detections, mean_conf, area_ratio = _detect_yolo(image)
 
     waste_type = _infer_type(title, description, detections, trash_cls_type)
-    severity_score, severity_level = _severity_from_signal(waste_type, len(detections), area_ratio, mean_conf)
+    severity_score, severity_level = _severity_from_nearby(nearby_report_count, waste_type)
 
     is_waste = True
     # Combine confidences: best of MobileNet, YOLO detections, and trained trash classifier
@@ -271,11 +298,12 @@ def main() -> None:
         'recommendedPriority': severity_level,
         'detectedObjects': detected_objects[:6],
         'rewardCredits': reward_credits,
+        'nearbyReportCount': nearby_report_count,
         'modelTrace': [
             'MobileNetV2: Waste vs Non-Waste',
             f'YOLOv8-Trash-Cls: {trash_cls_label} ({round(trash_cls_conf * 100)}%)' if _TRASH_CLS else 'YOLOv8-Trash-Cls: Not Loaded',
             'YOLOv8: Waste Detection & Severity',
-            'Google Maps: Location Attach',
+            f'Proximity: {nearby_report_count} report(s) within 500m',
         ],
         'pipeline': {
             'mobilenet': {

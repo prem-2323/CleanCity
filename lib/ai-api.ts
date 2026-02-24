@@ -4,6 +4,9 @@ type AnalyzeRequest = {
   imageSource: string;
   title: string;
   description?: string;
+  latitude?: number;
+  longitude?: number;
+  nearbyReportCount?: number;
 };
 
 type VerifyRequest = {
