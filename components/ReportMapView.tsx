@@ -8,12 +8,14 @@ let MapView: any;
 let Marker: any;
 let Circle: any;
 let UrlTile: any;
+let PROVIDER_GOOGLE: any;
 if (Platform.OS !== 'web') {
   const Maps = require('react-native-maps');
   MapView = Maps.default;
   Marker = Maps.Marker;
   Circle = Maps.Circle;
   UrlTile = Maps.UrlTile;
+  PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
 }
 
 /* ── Types ────────────────────────────────── */
@@ -160,6 +162,7 @@ export default function ReportMapView({
     <View style={styles.container}>
       <MapView
         ref={mapRef}
+        provider={PROVIDER_GOOGLE}
         style={styles.map}
         initialRegion={region}
         onPress={(event: any) => {
@@ -171,19 +174,13 @@ export default function ReportMapView({
             });
           }
         }}
-        showsUserLocation={false} // we draw our own marker
+        showsUserLocation={false}
         showsMyLocationButton={false}
         showsCompass
         showsScale
         rotateEnabled={false}
-        mapType={Platform.OS === 'android' ? 'none' : 'standard'}
+        mapType="standard"
       >
-        {UrlTile && (
-          <UrlTile
-            urlTemplate="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-            maximumZ={19}
-          />
-        )}
 
         {/* ── Report / Task markers ────────── */}
         {markers.map((m) => (

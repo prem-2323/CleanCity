@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "node:http";
 import { User } from "./models/User";
+import { ImageModel } from "./models/Image";
 import { analyzeWasteWithModels, verifyCleanupWithModels } from "./services/aiModelService";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -105,6 +106,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json(data);
     } catch (error: any) {
       return res.status(500).json({ message: error.message || 'Geocode reverse failed' });
+    }
+  });
+
+  // ── Image storage via MongoDB Atlas ──────────────────────────────
+
+  // Upload image — accepts { key, data } where data is a base64 data-URL
+  app.post('/api/images/upload', async (req, res) => {
+    try {
+      const { key, data } = req.body ?? {};
+      if (!key || !data) {
+        return res.status(400).json({ message: 'key and data are required' });
+      }
+
+      // Detect content type from data URL header
+      const ctMatch = String(data).match(/^data:(image\/[a-z+]+);base64,/i);
+      const contentType = ctMatch ? ctMatch[1] : 'image/jpeg';
+
+      await ImageModel.findOneAndUpdate(
+        { key },
+        { key, data: String(data), contentType, createdAt: new Date() },
+        { upsert: true, new: true },
+      );
+
+      // Return a URL the client can store in Firestore
+      const url = `/api/images/${encodeURIComponent(key)}`;
+      return res.json({ url, key });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || 'Image upload failed' });
+    }
+  });
+
+  // Serve image (returns raw binary with correct Content-Type)
+  app.get('/api/images/:key', async (req, res) => {
+    try {
+      const doc = await ImageModel.findOne({ key: req.params.key });
+      if (!doc) {
+        return res.status(404).json({ message: 'Image not found' });
+      }
+
+      const dataUrl = doc.data as string;
+      const commaIdx = dataUrl.indexOf(',');
+      if (commaIdx === -1) {
+        return res.status(500).json({ message: 'Malformed image data' });
+      }
+
+      const base64 = dataUrl.substring(commaIdx + 1);
+      const buffer = Buffer.from(base64, 'base64');
+
+      res.set('Content-Type', doc.contentType || 'image/jpeg');
+      res.set('Cache-Control', 'public, max-age=31536000, immutable');
+      return res.send(buffer);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || 'Image fetch failed' });
     }
   });
 

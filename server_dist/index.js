@@ -1,6 +1,6 @@
 // server/index.ts
 import express from "express";
-import * as mongoose2 from "mongoose";
+import * as mongoose3 from "mongoose";
 
 // server/routes.ts
 import { createServer } from "node:http";
@@ -33,6 +33,30 @@ var userSchema = new mongoose.Schema({
   }
 });
 var User = mongoose.model("User", userSchema);
+
+// server/models/Image.ts
+import * as mongoose2 from "mongoose";
+var imageSchema = new mongoose2.Schema({
+  key: {
+    type: String,
+    required: true,
+    unique: true,
+    index: true
+  },
+  data: {
+    type: String,
+    required: true
+  },
+  contentType: {
+    type: String,
+    default: "image/jpeg"
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+var ImageModel = mongoose2.model("Image", imageSchema);
 
 // server/services/aiModelService.ts
 import { spawn } from "node:child_process";
@@ -134,14 +158,17 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/ai/analyze", async (req, res) => {
     try {
-      const { imageSource, title, description } = req.body ?? {};
+      const { imageSource, title, description, latitude, longitude, nearbyReportCount } = req.body ?? {};
       if (!imageSource || !title) {
         return res.status(400).json({ message: "imageSource and title are required" });
       }
       const result = await analyzeWasteWithModels({
         imageSource: String(imageSource),
         title: String(title),
-        description: description ? String(description) : ""
+        description: description ? String(description) : "",
+        latitude: latitude != null ? Number(latitude) : void 0,
+        longitude: longitude != null ? Number(longitude) : void 0,
+        nearbyReportCount: nearbyReportCount != null ? Number(nearbyReportCount) : 1
       });
       return res.json(result);
     } catch (error) {
@@ -162,6 +189,67 @@ async function registerRoutes(app2) {
       return res.json(result);
     } catch (error) {
       return res.status(500).json({ message: error.message || "AI verify failed" });
+    }
+  });
+  app2.get("/api/geocode/reverse", async (req, res) => {
+    try {
+      const { lat, lon } = req.query;
+      if (!lat || !lon) {
+        return res.status(400).json({ message: "lat and lon query params are required" });
+      }
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lon))}`;
+      const response = await fetch(url, {
+        headers: {
+          "Accept": "application/json",
+          "User-Agent": "CleanCity-App/1.0 (civic-waste-reporting)"
+        }
+      });
+      if (!response.ok) {
+        return res.status(response.status).json({ message: "Nominatim request failed" });
+      }
+      const data = await response.json();
+      return res.json(data);
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Geocode reverse failed" });
+    }
+  });
+  app2.post("/api/images/upload", async (req, res) => {
+    try {
+      const { key, data } = req.body ?? {};
+      if (!key || !data) {
+        return res.status(400).json({ message: "key and data are required" });
+      }
+      const ctMatch = String(data).match(/^data:(image\/[a-z+]+);base64,/i);
+      const contentType = ctMatch ? ctMatch[1] : "image/jpeg";
+      await ImageModel.findOneAndUpdate(
+        { key },
+        { key, data: String(data), contentType, createdAt: /* @__PURE__ */ new Date() },
+        { upsert: true, new: true }
+      );
+      const url = `/api/images/${encodeURIComponent(key)}`;
+      return res.json({ url, key });
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Image upload failed" });
+    }
+  });
+  app2.get("/api/images/:key", async (req, res) => {
+    try {
+      const doc = await ImageModel.findOne({ key: req.params.key });
+      if (!doc) {
+        return res.status(404).json({ message: "Image not found" });
+      }
+      const dataUrl = doc.data;
+      const commaIdx = dataUrl.indexOf(",");
+      if (commaIdx === -1) {
+        return res.status(500).json({ message: "Malformed image data" });
+      }
+      const base64 = dataUrl.substring(commaIdx + 1);
+      const buffer = Buffer.from(base64, "base64");
+      res.set("Content-Type", doc.contentType || "image/jpeg");
+      res.set("Cache-Control", "public, max-age=31536000, immutable");
+      return res.send(buffer);
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Image fetch failed" });
     }
   });
   const httpServer = createServer(app2);
@@ -204,12 +292,13 @@ function setupCors(app2) {
 function setupBodyParsing(app2) {
   app2.use(
     express.json({
+      limit: "50mb",
       verify: (req, _res, buf) => {
         req.rawBody = buf;
       }
     })
   );
-  app2.use(express.urlencoded({ extended: false }));
+  app2.use(express.urlencoded({ extended: false, limit: "50mb" }));
 }
 function setupRequestLogging(app2) {
   app2.use((req, res, next) => {
@@ -333,7 +422,7 @@ function setupErrorHandler(app2) {
   }
   try {
     console.log("Connecting to MongoDB...");
-    await mongoose2.connect(process.env.DATABASE_URL);
+    await mongoose3.connect(process.env.DATABASE_URL);
     console.log("Connected to MongoDB successfully");
   } catch (error) {
     console.error("MongoDB connection error:", error);

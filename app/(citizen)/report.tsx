@@ -10,6 +10,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/lib/firebase';
+import { uploadImageToServer } from '@/lib/ai-api';
 import { useReports, WasteType, Report } from '@/contexts/ReportsContext';
 
 /** Haversine distance in meters between two lat/lng points */
@@ -52,6 +53,7 @@ export default function ReportWasteScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
 
   // Fetch location on mount
   React.useEffect(() => {
@@ -324,34 +326,48 @@ export default function ReportWasteScreen() {
 
   // Removed dedicated handleTakePhoto to use showImagePickerOptions instead
 
+  /** Convert a local/blob URI to a base64 data URL. */
+  const toDataUrl = async (uri: string): Promise<string> => {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read image'));
+      reader.readAsDataURL(blob);
+    });
+  };
+
   const uploadImage = async (uri: string, reportId: string) => {
-    if (Platform.OS === 'web') {
-      const response = await fetch(uri);
-      const blob = await response.blob();
+    const dataUrl = await toDataUrl(uri);
 
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error('Failed to process image on web'));
-        reader.readAsDataURL(blob);
-      });
-
-      return dataUrl;
+    // Try uploading to MongoDB Atlas via the server API
+    try {
+      const url = await uploadImageToServer(`reports/${reportId}.jpg`, dataUrl);
+      return url;
+    } catch (err) {
+      console.warn('Server image upload failed, trying Firebase Storage:', err);
     }
 
-    // React Native: use XMLHttpRequest to create a proper blob from local file URI
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.onload = () => resolve(xhr.response as Blob);
-      xhr.onerror = () => reject(new Error('Failed to read image file'));
-      xhr.responseType = 'blob';
-      xhr.open('GET', uri, true);
-      xhr.send(null);
-    });
+    // Fallback: Firebase Storage (if enabled)
+    if (Platform.OS !== 'web') {
+      try {
+        const blob = await new Promise<Blob>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = () => resolve(xhr.response as Blob);
+          xhr.onerror = () => reject(new Error('Failed to read image file'));
+          xhr.responseType = 'blob';
+          xhr.open('GET', uri, true);
+          xhr.send(null);
+        });
+        const storageRef = ref(storage, `reports/${reportId}.jpg`);
+        await uploadBytes(storageRef, blob);
+        return await getDownloadURL(storageRef);
+      } catch { /* fall through */ }
+    }
 
-    const storageRef = ref(storage, `reports/${reportId}.jpg`);
-    await uploadBytes(storageRef, blob);
-    return await getDownloadURL(storageRef);
+    // Last resort: return the data URL itself
+    return dataUrl;
   };
 
   const handleSubmit = async () => {
@@ -546,15 +562,15 @@ export default function ReportWasteScreen() {
           </View>
 
           {locationCoords && (
-            <Animated.View entering={FadeInDown.delay(400)} style={styles.mapContainer}>
+            <Animated.View entering={FadeInDown.delay(400)} style={[styles.mapContainer, isMapExpanded && styles.mapContainerExpanded]}>
               <ReportMapView
                 markers={[
                   {
                     id: 'current-location',
                     latitude: locationCoords.latitude,
                     longitude: locationCoords.longitude,
-                    title: 'Current Location',
-                    description: address || 'Verified location',
+                    title: 'Waste Location',
+                    description: address || 'Tap to move pin',
                     color: Colors.primary,
                   },
                 ]}
@@ -563,19 +579,31 @@ export default function ReportWasteScreen() {
                 initialRegion={{
                   latitude: locationCoords.latitude,
                   longitude: locationCoords.longitude,
-                  latitudeDelta: 0.005,
-                  longitudeDelta: 0.005,
+                  latitudeDelta: isMapExpanded ? 0.002 : 0.005,
+                  longitudeDelta: isMapExpanded ? 0.002 : 0.005,
                 }}
                 onMapPress={(coords) => {
                   setLocationFromCoords(coords.latitude, coords.longitude);
                 }}
               />
-              <View style={styles.mapOverlay}>
-                <Ionicons name="location" size={16} color={Colors.primary} />
-                <Text style={styles.mapOverlayText} numberOfLines={1}>
-                  Verified Location
-                </Text>
-              </View>
+              <Pressable
+                onPress={() => {
+                  setIsMapExpanded(!isMapExpanded);
+                  if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                }}
+                style={styles.expandMapBtn}
+              >
+                <Ionicons name={isMapExpanded ? "contract" : "expand"} size={18} color={Colors.white} />
+              </Pressable>
+
+              {!isMapExpanded && (
+                <View style={styles.mapOverlay}>
+                  <Ionicons name="location" size={16} color={Colors.primary} />
+                  <Text style={styles.mapOverlayText} numberOfLines={1}>
+                    Refine on map
+                  </Text>
+                </View>
+              )}
             </Animated.View>
           )}
         </Animated.View>
@@ -669,6 +697,21 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1.5,
     borderColor: Colors.gray200,
+  },
+  mapContainerExpanded: {
+    height: 400,
+    marginTop: 16,
+  },
+  expandMapBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   map: {
     flex: 1,

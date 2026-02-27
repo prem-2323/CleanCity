@@ -31,17 +31,16 @@ export interface ReportMapViewProps {
 }
 
 /**
- * Build self-contained Leaflet HTML that renders all markers + user location.
- * Runs inside an iframe via srcdoc so no external CORS issues.
+ * Build self-contained Google Maps HTML that renders all markers + user location.
+ * Runs inside an iframe via srcdoc.
  */
-function buildLeafletHtml(
+function buildGoogleMapsHtml(
   markers: MapMarker[],
   userLocation?: { latitude: number; longitude: number } | null,
 ): string {
-  // Compute center & zoom from markers + user location
   const points = [
-    ...markers.map((m) => [m.latitude, m.longitude]),
-    ...(userLocation ? [[userLocation.latitude, userLocation.longitude]] : []),
+    ...markers.map((m) => ({ lat: m.latitude, lng: m.longitude, title: m.title, color: m.color, desc: m.description })),
+    ...(userLocation ? [{ lat: userLocation.latitude, lng: userLocation.longitude, title: 'Your Location', color: Colors.secondary, desc: '' }] : []),
   ];
 
   let centerLat = 13.0827;
@@ -49,79 +48,77 @@ function buildLeafletHtml(
   let defaultZoom = 13;
 
   if (points.length === 1) {
-    centerLat = points[0][0];
-    centerLng = points[0][1];
+    centerLat = points[0].lat;
+    centerLng = points[0].lng;
     defaultZoom = 15;
   } else if (points.length > 1) {
-    const lats = points.map((p) => p[0]);
-    const lngs = points.map((p) => p[1]);
+    const lats = points.map((p) => p.lat);
+    const lngs = points.map((p) => p.lng);
     centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
     centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
   }
 
-  const markersJs = markers
-    .map(
-      (m) =>
-        `L.circleMarker([${m.latitude}, ${m.longitude}], {
-          radius: 10,
-          fillColor: '${m.color}',
-          color: '#fff',
-          weight: 2,
-          opacity: 1,
-          fillOpacity: 0.85
-        }).addTo(map).bindPopup(\`<b>${m.title.replace(/'/g, "\\'").replace(/`/g, "\\`")}</b>${m.description ? `<br/><span style="color:#666;font-size:12px">${m.description.replace(/'/g, "\\'").replace(/`/g, "\\`")}</span>` : ''}\`).on('click', function(){ window.parent.postMessage({type:'marker-click',id:'${m.id}'},'*'); });`,
-    )
-    .join('\n');
-
-  const userJs = userLocation
-    ? `L.circleMarker([${userLocation.latitude}, ${userLocation.longitude}], {
-        radius: 8,
-        fillColor: '${Colors.secondary}',
-        color: '#fff',
-        weight: 3,
-        opacity: 1,
-        fillOpacity: 0.9
-      }).addTo(map).bindPopup('<b>Your Location</b>');
-      L.circle([${userLocation.latitude}, ${userLocation.longitude}], {
-        radius: 300,
-        color: '${Colors.secondary}',
-        fillColor: '${Colors.secondary}',
-        fillOpacity: 0.08,
-        weight: 1
-      }).addTo(map);`
-    : '';
-
-  // Fit bounds to all points
-  const fitBoundsJs =
-    points.length > 1
-      ? `map.fitBounds([${points.map((p) => `[${p[0]},${p[1]}]`).join(',')}], {padding:[40,40]});`
-      : '';
+  const markersData = JSON.stringify(points);
 
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body, #map { width: 100%; height: 100%; }
-    .leaflet-control-attribution { font-size: 10px !important; }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <script>
-    var map = L.map('map').setView([${centerLat}, ${centerLng}], ${defaultZoom});
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-      maxZoom: 19
-    }).addTo(map);
-    ${markersJs}
-    ${userJs}
-    ${fitBoundsJs}
-  <\/script>
+    function initMap() {
+      const markers = ${markersData};
+      const map = new google.maps.Map(document.getElementById('map'), {
+        center: { lat: ${centerLat}, lng: ${centerLng} },
+        zoom: ${defaultZoom},
+        mapId: 'DEMO_MAP_ID', // For advanced markers if needed
+        disableDefaultUI: false,
+        zoomControl: true,
+      });
+
+      const bounds = new google.maps.LatLngBounds();
+
+      markers.forEach((m, index) => {
+        const position = { lat: m.lat, lng: m.lng };
+        const marker = new google.maps.Marker({
+          position: position,
+          map: map,
+          title: m.title,
+          icon: m.title === 'Your Location' ? undefined : {
+            path: google.maps.SymbolPath.CIRCLE,
+            fillColor: m.color,
+            fillOpacity: 0.9,
+            strokeColor: '#fff',
+            strokeWeight: 2,
+            scale: 10
+          }
+        });
+
+        const infoWindow = new google.maps.InfoWindow({
+          content: '<div style="padding:5px"><b>' + m.title + '</b>' + (m.desc ? '<br/><span style="color:#666;font-size:12px">' + m.desc + '</span>' : '') + '</div>'
+        });
+
+        marker.addListener('click', () => {
+          infoWindow.open(map, marker);
+          window.parent.postMessage({type:'marker-click', id: markers[index].id}, '*');
+        });
+
+        bounds.extend(position);
+      });
+
+      if (markers.length > 1) {
+        map.fitBounds(bounds);
+      }
+    }
+  </script>
+  <script src="https://maps.googleapis.com/maps/api/js?callback=initMap" async defer></script>
 </body>
 </html>`;
 }
@@ -135,7 +132,7 @@ export default function ReportMapView({
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const htmlContent = useMemo(
-    () => buildLeafletHtml(markers, userLocation),
+    () => buildGoogleMapsHtml(markers, userLocation),
     [markers, userLocation],
   );
 
@@ -160,9 +157,9 @@ export default function ReportMapView({
 
   const centerLat = markers[0]?.latitude ?? userLocation?.latitude ?? 0;
   const centerLng = markers[0]?.longitude ?? userLocation?.longitude ?? 0;
-  const openStreetMapUrl =
+  const googleMapsUrl =
     centerLat !== 0
-      ? `https://www.openstreetmap.org/?mlat=${centerLat}&mlon=${centerLng}#map=16/${centerLat}/${centerLng}`
+      ? `https://www.google.com/maps/search/?api=1&query=${centerLat},${centerLng}`
       : null;
 
   return (
@@ -185,11 +182,11 @@ export default function ReportMapView({
             </Text>
           </View>
 
-          {/* Open in OSM link */}
-          {openStreetMapUrl && (
+          {/* Open in Google Maps link */}
+          {googleMapsUrl && (
             <Pressable
               style={styles.openMapBtn}
-              onPress={() => Linking.openURL(openStreetMapUrl)}
+              onPress={() => Linking.openURL(googleMapsUrl)}
             >
               <Ionicons name="open-outline" size={14} color={Colors.primary} />
               <Text style={styles.openMapText}>Open in Maps</Text>
@@ -201,11 +198,6 @@ export default function ReportMapView({
           <Ionicons name="map" size={40} color={Colors.primary} />
           <Text style={styles.webFallbackTitle}>Map View</Text>
           <Text style={styles.webFallbackText}>No reports to show yet</Text>
-          {userLocation && (
-            <Text style={styles.webFallbackCoords}>
-              Your location: {userLocation.latitude.toFixed(4)}, {userLocation.longitude.toFixed(4)}
-            </Text>
-          )}
         </View>
       )}
 

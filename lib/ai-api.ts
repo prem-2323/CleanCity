@@ -61,3 +61,20 @@ export function analyzeWasteApi<TResponse>(payload: AnalyzeRequest): Promise<TRe
 export function verifyCleanupApi<TResponse>(payload: VerifyRequest): Promise<TResponse> {
   return postJson<TResponse>('/api/ai/verify-cleanup', payload);
 }
+
+/** Upload a base64 data-URL image to the server (stored in MongoDB Atlas). */
+export async function uploadImageToServer(key: string, dataUrl: string): Promise<string> {
+  const baseUrl = resolveApiBaseUrl();
+  const res = await fetch(`${baseUrl}/api/images/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key, data: dataUrl }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `Image upload failed (${res.status})`);
+  }
+  const json = (await res.json()) as { url: string; key: string };
+  // Return full URL so it can be stored in Firestore and loaded anywhere
+  return `${baseUrl}${json.url}`;
+}

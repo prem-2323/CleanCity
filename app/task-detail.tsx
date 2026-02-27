@@ -15,7 +15,7 @@ import Colors from '@/constants/colors';
 import { db, storage } from '@/lib/firebase';
 import { doc, onSnapshot, updateDoc, increment } from 'firebase/firestore';
 import { verifyCleanup } from '@/lib/ai-pipeline';
-import { verifyCleanupApi } from '@/lib/ai-api';
+import { verifyCleanupApi, uploadImageToServer } from '@/lib/ai-api';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 export default function TaskDetailScreen() {
@@ -120,26 +120,48 @@ export default function TaskDetailScreen() {
     await Linking.openURL(url);
   };
 
-  const uploadAfterImage = async (uri: string, reportId: string) => {
-    if (Platform.OS === 'web') {
-      const response = await fetch(uri);
-      const blob = await response.blob();
-
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error('Failed to process image on web'));
-        reader.readAsDataURL(blob);
-      });
-
-      return dataUrl;
-    }
-
+  /** Convert a local/blob URI to a base64 data URL. */
+  const toDataUrl = async (uri: string): Promise<string> => {
     const response = await fetch(uri);
     const blob = await response.blob();
-    const storageRef = ref(storage, `reports/${reportId}-after.jpg`);
-    await uploadBytes(storageRef, blob);
-    return await getDownloadURL(storageRef);
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read image'));
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  const uploadAfterImage = async (uri: string, reportId: string) => {
+    const dataUrl = await toDataUrl(uri);
+
+    // Try uploading to MongoDB Atlas via the server API
+    try {
+      const url = await uploadImageToServer(`reports/${reportId}-after.jpg`, dataUrl);
+      return url;
+    } catch (err) {
+      console.warn('Server image upload failed, trying Firebase Storage:', err);
+    }
+
+    // Fallback: Firebase Storage (if enabled)
+    if (Platform.OS !== 'web') {
+      try {
+        const blob = await new Promise<Blob>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = () => resolve(xhr.response as Blob);
+          xhr.onerror = () => reject(new Error('Failed to read image'));
+          xhr.responseType = 'blob';
+          xhr.open('GET', uri, true);
+          xhr.send(null);
+        });
+        const storageRef = ref(storage, `reports/${reportId}-after.jpg`);
+        await uploadBytes(storageRef, blob);
+        return await getDownloadURL(storageRef);
+      } catch { /* fall through */ }
+    }
+
+    // Last resort: return the data URL itself
+    return dataUrl;
   };
 
   const handleComplete = async () => {
