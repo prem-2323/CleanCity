@@ -1,4 +1,0 @@
-
-> expo-app@1.0.0 server:dev
-> tsx server/index.ts
-
