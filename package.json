@@ -3,7 +3,8 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
-    "postinstall": "patch-package",
+    "postinstall": "node scripts/download-models.js && patch-package",
+    "download-models": "node scripts/download-models.js",
     "dev": "concurrently \"npm run server:dev\" \"npm run start\"",
     "start": "npx expo start --port 8081",
     "start:web": "npx expo start --web --port 8081",
