@@ -74,11 +74,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tokenEndpoint: 'https://oauth2.googleapis.com/token',
   };
 
-  const redirectUri = AuthSession.makeRedirectUri();
+  const nativeGoogleClientId = Platform.select({
+    android: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+    ios: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+    default: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+  });
+
+  const redirectUri = AuthSession.makeRedirectUri(
+    Platform.OS === 'web'
+      ? undefined
+      : {
+          scheme: 'cleanmap',
+        }
+  );
 
   const [googleRequest, googleResponse, promptGoogleAsync] = AuthSession.useAuthRequest(
     {
-      clientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID!,
+      clientId: nativeGoogleClientId || process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',
       redirectUri,
       responseType: AuthSession.ResponseType.IdToken,
       scopes: ['openid', 'profile', 'email'],
@@ -346,8 +358,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } else {
         // Native (Expo Go): use expo-auth-session
+        if (!nativeGoogleClientId) {
+          throw new Error(
+            'Google Sign-In on mobile is not configured. Set EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID (and EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID for iOS) from Google Cloud OAuth clients.'
+          );
+        }
         if (!promptGoogleAsync) {
-          throw new Error('Google Sign-In is not configured. Please set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID in your .env file.');
+          throw new Error('Google Sign-In is not configured. Please check your Google OAuth client IDs in .env.');
         }
         setPendingGoogleRole(role);
         const result = await promptGoogleAsync();

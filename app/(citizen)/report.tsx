@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Platform, TextInput, Image, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Platform, TextInput, Dimensions, Modal } from 'react-native';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -54,6 +55,7 @@ export default function ReportWasteScreen() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
+  const [showPickerModal, setShowPickerModal] = useState(false);
 
   // Fetch location on mount
   React.useEffect(() => {
@@ -306,20 +308,7 @@ export default function ReportWasteScreen() {
   };
 
   const showImagePickerOptions = () => {
-    if (Platform.OS === 'web') {
-      handlePickImage(false); // Library for web
-      return;
-    }
-
-    Alert.alert(
-      'Select ImageSource',
-      'Choose how you want to upload the waste report image',
-      [
-        { text: 'Take Photo', onPress: () => handlePickImage(true) },
-        { text: 'Upload from Gallery', onPress: () => handlePickImage(false) },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
+    setShowPickerModal(true);
   };
 
   const canSubmit = title.trim() && selectedType && address.trim() && imageUri;
@@ -480,10 +469,22 @@ export default function ReportWasteScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Animated.View entering={FadeInDown.delay(100).duration(400)}>
-          <Pressable onPress={showImagePickerOptions} style={[styles.photoArea, imageUri && styles.photoAreaActive]}>
+          <Pressable
+            onPress={showImagePickerOptions}
+            style={[
+              styles.photoArea,
+              imageUri && styles.photoAreaActive,
+              imageUri && { padding: 0, overflow: 'hidden', borderStyle: 'solid' }
+            ]}
+          >
             {imageUri ? (
               <View style={styles.photoTakenContent}>
-                <Image source={{ uri: imageUri }} style={styles.cameraPreview} />
+                <Image
+                  source={{ uri: imageUri }}
+                  style={styles.cameraPreview}
+                  contentFit="cover"
+                  transition={200}
+                />
                 <View style={styles.photoOverlay}>
                   <View style={styles.photoCheckCircle}>
                     <Ionicons name="checkmark" size={20} color={Colors.white} />
@@ -609,6 +610,66 @@ export default function ReportWasteScreen() {
         </Animated.View>
       </ScrollView>
 
+      {/* Image Picker Custom Modal */}
+      <Modal
+        visible={showPickerModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPickerModal(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setShowPickerModal(false)}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalTitle}>Select Image Source</Text>
+              <Text style={styles.modalSubtitle}>How would you like to add the waste photo?</Text>
+            </View>
+
+            <View style={styles.pickerOptions}>
+              <Pressable
+                style={({ pressed }) => [styles.pickerOption, pressed && { backgroundColor: Colors.gray50 }]}
+                onPress={() => { setShowPickerModal(false); setTimeout(() => handlePickImage(true), 500); }}
+              >
+                <View style={[styles.pickerIconWrap, { backgroundColor: '#EEF2FF' }]}>
+                  <Ionicons name="camera" size={28} color={Colors.primary} />
+                </View>
+                <View style={styles.pickerTextWrap}>
+                  <Text style={styles.pickerLabel}>Take Photo</Text>
+                  <Text style={styles.pickerDesc}>Use your camera to snap a live photo</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={Colors.gray300} />
+              </Pressable>
+
+              <View style={styles.pickerDivider} />
+
+              <Pressable
+                style={({ pressed }) => [styles.pickerOption, pressed && { backgroundColor: Colors.gray50 }]}
+                onPress={() => { setShowPickerModal(false); setTimeout(() => handlePickImage(false), 500); }}
+              >
+                <View style={[styles.pickerIconWrap, { backgroundColor: '#F0FDF4' }]}>
+                  <Ionicons name="image" size={28} color="#10B981" />
+                </View>
+                <View style={styles.pickerTextWrap}>
+                  <Text style={styles.pickerLabel}>Upload from Device</Text>
+                  <Text style={styles.pickerDesc}>Choose an existing image from gallery</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={Colors.gray300} />
+              </Pressable>
+            </View>
+
+            <Pressable
+              style={styles.modalCancelBtn}
+              onPress={() => setShowPickerModal(false)}
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
       <View style={[styles.bottomBar, { paddingBottom: (Platform.OS === 'web' ? 94 : insets.bottom + 74) }]}>
         <Pressable
           onPress={handleSubmit}
@@ -643,7 +704,7 @@ const styles = StyleSheet.create({
   cameraCircle: { width: 64, height: 64, borderRadius: 20, backgroundColor: Colors.lightBlue, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   photoText: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.gray800 },
   photoHint: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.gray400, marginTop: 4 },
-  photoTakenContent: { alignItems: 'center' },
+  photoTakenContent: { width: '100%', position: 'relative', alignItems: 'center' },
   photoCheckCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.success, alignItems: 'center', justifyContent: 'center' },
   photoTakenText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.white },
   changeBtn: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
@@ -683,7 +744,7 @@ const styles = StyleSheet.create({
   submitBtnInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   submitBtnDisabled: { backgroundColor: Colors.gray200, shadowOpacity: 0 },
   submitText: { fontSize: 17, fontFamily: 'Inter_700Bold', color: Colors.white },
-  cameraPreview: { width: '100%', height: 220, borderRadius: 20 },
+  cameraPreview: { width: '100%', height: 280, borderRadius: 20 },
   photoOverlay: { position: 'absolute', bottom: 12, left: 12, right: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', padding: 10, borderRadius: 16, gap: 10 },
   analyzingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,255,255,0.7)', justifyContent: 'center', alignItems: 'center', borderRadius: 20 },
   analyzingText: { marginTop: 10, fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.primary },
@@ -692,7 +753,7 @@ const styles = StyleSheet.create({
   refreshBtn: { padding: 4 },
   mapContainer: {
     marginTop: 12,
-    height: 150,
+    height: 600,
     borderRadius: 18,
     overflow: 'hidden',
     borderWidth: 1.5,
@@ -712,16 +773,6 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  map: {
-    flex: 1,
-  },
-  markerContainer: {
-    backgroundColor: Colors.primary + '20',
-    padding: 10,
-    borderRadius: 100,
-    borderWidth: 2,
-    borderColor: Colors.primary,
   },
   markerDot: {
     width: 8,
@@ -766,5 +817,91 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'Inter_400Regular',
     color: Colors.gray500,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: Colors.white,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    ...Colors.cardShadow,
+  },
+  modalHeader: {
+    alignItems: 'center',
+    paddingTop: 12,
+    paddingBottom: 20,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: Colors.gray200,
+    borderRadius: 2,
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+    color: Colors.gray900,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: Colors.gray500,
+    marginTop: 4,
+  },
+  pickerOptions: {
+    paddingHorizontal: 20,
+  },
+  pickerOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    gap: 16,
+  },
+  pickerIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerTextWrap: {
+    flex: 1,
+  },
+  pickerLabel: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: Colors.gray900,
+  },
+  pickerDesc: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    color: Colors.gray500,
+    marginTop: 2,
+  },
+  pickerDivider: {
+    height: 1,
+    backgroundColor: Colors.gray100,
+    marginHorizontal: 0,
+  },
+  modalCancelBtn: {
+    marginTop: 12,
+    marginHorizontal: 20,
+    height: 54,
+    borderRadius: 16,
+    backgroundColor: Colors.gray50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.gray100,
+  },
+  modalCancelText: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: Colors.gray700,
   },
 });

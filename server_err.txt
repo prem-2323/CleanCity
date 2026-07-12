@@ -1,0 +1,18 @@
+C:\Users\premk\Videos\POJECT\intenship\4.CleanCity\server\index.ts:232
+    throw new Error("DATABASE_URL is required");
+          ^
+
+
+Error: DATABASE_URL is required
+    at <anonymous> (C:\Users\premk\Videos\POJECT\intenship\4.CleanCity\server\index.ts:232:11)
+    at app (C:\Users\premk\Videos\POJECT\intenship\4.CleanCity\server\index.ts:264:1)
+    at Object.<anonymous> (C:\Users\premk\Videos\POJECT\intenship\4.CleanCity\server\index.ts:264:4)
+    at Module._compile (node:internal/modules/cjs/loader:1565:14)
+    at Object.transformer (C:\Users\premk\Videos\POJECT\intenship\4.CleanCity\node_modules\tsx\dist\register-D46fvsV_.cjs:3:1104)
+    at Module.load (node:internal/modules/cjs/loader:1318:32)
+    at Function._load (node:internal/modules/cjs/loader:1128:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:219:24)
+    at cjsLoader (node:internal/modules/esm/translators:263:5)
+
+Node.js v22.12.0

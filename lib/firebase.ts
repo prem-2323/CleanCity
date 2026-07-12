@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAnalytics, isSupported } from "firebase/analytics";
 import { getAuth, initializeAuth, getReactNativePersistence } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -30,7 +30,20 @@ const auth = Platform.OS === 'web'
       persistence: getReactNativePersistence(AsyncStorage),
     });
 
-const db = getFirestore(app);
+const db = Platform.OS === 'web'
+  ? (() => {
+      try {
+        // Expo web can fail on WebChannel in some networks; force long-polling for stability.
+        return initializeFirestore(app, {
+          experimentalForceLongPolling: true,
+          useFetchStreams: false,
+        });
+      } catch {
+        // If Firestore is already initialized (hot reload), reuse the existing instance.
+        return getFirestore(app);
+      }
+    })()
+  : getFirestore(app);
 const storage = getStorage(app);
 
 export { app, analytics, auth, db, storage };

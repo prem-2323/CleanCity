@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
   description: { fontSize: 14, fontFamily: 'Inter_400Regular', color: Colors.gray600, lineHeight: 22 },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
   address: { fontSize: 14, fontFamily: 'Inter_400Regular', color: Colors.gray700, flex: 1 },
-  mapPreview: { height: 100, borderRadius: 12, backgroundColor: Colors.lightBlue, alignItems: 'center', justifyContent: 'center' },
+  mapPreview: { height: 400, borderRadius: 12, backgroundColor: Colors.lightBlue, alignItems: 'center', justifyContent: 'center' },
   reportImage: { width: '100%', height: 220, borderRadius: 12 },
   imagePlaceholder: { height: 120, borderRadius: 12, backgroundColor: Colors.gray100, alignItems: 'center', justifyContent: 'center', gap: 6 },
   imagePlaceholderText: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.gray400 },
