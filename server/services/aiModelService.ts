@@ -31,7 +31,7 @@ function runPythonScript<TResponse extends JsonRecord>(scriptRelativePath: strin
     const child = spawn(pythonExe, [scriptPath], {
       cwd: workspaceRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: process.env,
+      env: { ...process.env, KMP_DUPLICATE_LIB_OK: 'TRUE' },
     });
 
     let stdout = '';
